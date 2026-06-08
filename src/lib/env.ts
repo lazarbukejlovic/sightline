@@ -1,0 +1,69 @@
+import { z } from "zod";
+
+/**
+ * Validated environment access.
+ *
+ * Split into `client` (NEXT_PUBLIC_*, safe in the browser) and `server`
+ * (secrets that must never reach the client). The server schema is only
+ * parsed on the server; importing it from a client component will throw.
+ */
+
+const clientSchema = z.object({
+  NEXT_PUBLIC_SUPABASE_URL: z.string().url(),
+  NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().min(1),
+  NEXT_PUBLIC_SITE_URL: z.string().url().default("http://localhost:3000"),
+});
+
+const serverSchema = z.object({
+  SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
+  DATABASE_URL: z.string().url(),
+  DIRECT_URL: z.string().url().optional(),
+});
+
+export type ClientEnv = z.infer<typeof clientSchema>;
+export type ServerEnv = z.infer<typeof serverSchema>;
+
+function format(error: z.ZodError): string {
+  return error.issues
+    .map((i) => `  - ${i.path.join(".") || "(root)"}: ${i.message}`)
+    .join("\n");
+}
+
+/**
+ * Parse a raw record against the client schema. Exported (rather than only
+ * the singleton) so it can be unit-tested without real process env.
+ */
+export function parseClientEnv(source: Record<string, string | undefined>): ClientEnv {
+  const parsed = clientSchema.safeParse(source);
+  if (!parsed.success) {
+    throw new Error(
+      `Invalid client environment variables:\n${format(parsed.error)}`,
+    );
+  }
+  return parsed.data;
+}
+
+export function parseServerEnv(source: Record<string, string | undefined>): ServerEnv {
+  const parsed = serverSchema.safeParse(source);
+  if (!parsed.success) {
+    throw new Error(
+      `Invalid server environment variables:\n${format(parsed.error)}`,
+    );
+  }
+  return parsed.data;
+}
+
+// NEXT_PUBLIC_* are statically inlined by Next, so reference them explicitly.
+export const clientEnv: ClientEnv = parseClientEnv({
+  NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
+  NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+  NEXT_PUBLIC_SITE_URL: process.env.NEXT_PUBLIC_SITE_URL,
+});
+
+/** Lazily resolve server env so client bundles never evaluate it. */
+let cachedServerEnv: ServerEnv | null = null;
+export function getServerEnv(): ServerEnv {
+  if (cachedServerEnv) return cachedServerEnv;
+  cachedServerEnv = parseServerEnv(process.env);
+  return cachedServerEnv;
+}

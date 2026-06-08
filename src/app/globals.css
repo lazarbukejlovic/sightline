@@ -1,0 +1,132 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+  Sightline design system — "intelligence briefing", light-first.
+  Base: warm paper white. Ink: near-black. Signal: sharp red for change.
+  Calm secondary: deep teal for reviewed / on-track.
+*/
+
+:root {
+  --radius: 0.625rem;
+
+  /* Brand palette (raw) */
+  --paper: #faf9f6;
+  --paper-2: #f3f1ea;
+  --ink: #16150f;
+  --ink-soft: #514e44;
+  --signal: #e5484d; /* change detected / high impact */
+  --signal-ink: #fbeceb;
+  --teal: #137a6e; /* reviewed / on-track */
+
+  /* shadcn semantic tokens (light = hero) */
+  --background: var(--paper);
+  --foreground: var(--ink);
+  --card: #ffffff;
+  --card-foreground: var(--ink);
+  --popover: #ffffff;
+  --popover-foreground: var(--ink);
+  --primary: var(--ink);
+  --primary-foreground: var(--paper);
+  --secondary: var(--paper-2);
+  --secondary-foreground: var(--ink);
+  --muted: var(--paper-2);
+  --muted-foreground: var(--ink-soft);
+  --accent: var(--paper-2);
+  --accent-foreground: var(--ink);
+  --destructive: var(--signal);
+  --destructive-foreground: #ffffff;
+  --border: #e7e3d8;
+  --input: #e7e3d8;
+  --ring: var(--ink);
+}
+
+.dark {
+  --background: #100f0b;
+  --foreground: #f3f1ea;
+  --card: #1a1813;
+  --card-foreground: #f3f1ea;
+  --popover: #1a1813;
+  --popover-foreground: #f3f1ea;
+  --primary: #f3f1ea;
+  --primary-foreground: #100f0b;
+  --secondary: #24221b;
+  --secondary-foreground: #f3f1ea;
+  --muted: #24221b;
+  --muted-foreground: #a8a392;
+  --accent: #24221b;
+  --accent-foreground: #f3f1ea;
+  --destructive: #ff6166;
+  --destructive-foreground: #100f0b;
+  --border: #2c2a22;
+  --input: #2c2a22;
+  --ring: #d8d4c6;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-signal: var(--signal);
+  --color-signal-ink: var(--signal-ink);
+  --color-teal: var(--teal);
+  --color-paper: var(--paper);
+  --color-ink: var(--ink);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  /* Fonts wired from next/font in layout.tsx */
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-serif: var(--font-newsreader), ui-serif, Georgia, serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, monospace;
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  ::selection {
+    background-color: color-mix(in srgb, var(--signal) 22%, transparent);
+  }
+}
+
+/* Editorial display utility for competitor names + big numbers */
+@layer components {
+  .font-display {
+    font-family: var(--font-serif);
+    letter-spacing: -0.01em;
+  }
+  .font-meta {
+    font-family: var(--font-mono);
+    font-feature-settings: "tnum" 1;
+  }
+}
