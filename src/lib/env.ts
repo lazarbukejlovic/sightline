@@ -18,6 +18,14 @@ const serverSchema = z.object({
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
   DATABASE_URL: z.string().url(),
   DIRECT_URL: z.string().url().optional(),
+  // Phase 1 — external services (server-only).
+  ANTHROPIC_API_KEY: z.string().min(1),
+  ANTHROPIC_MODEL: z.string().min(1).default("claude-opus-4-8"),
+  // OpenAI is OPTIONAL — embeddings / Ask Sightline RAG degrade gracefully
+  // when it is absent or out of quota. The core scan loop never depends on it.
+  OPENAI_API_KEY: z.string().min(1).optional(),
+  OPENAI_EMBEDDING_MODEL: z.string().min(1).default("text-embedding-3-small"),
+  FIRECRAWL_API_KEY: z.string().min(1),
 });
 
 export type ClientEnv = z.infer<typeof clientSchema>;

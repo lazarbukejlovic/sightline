@@ -9,7 +9,8 @@ export type ChangeCategory =
   | "product"
   | "positioning"
   | "hiring"
-  | "funding";
+  | "funding"
+  | "other";
 
 export interface ChangeCardData {
   competitor: string;
@@ -29,6 +30,7 @@ const categoryLabel: Record<ChangeCategory, string> = {
   positioning: "Positioning",
   hiring: "Hiring",
   funding: "Funding",
+  other: "Other",
 };
 
 export function ChangeCard({

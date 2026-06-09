@@ -11,6 +11,9 @@ const validServer = {
   SUPABASE_SERVICE_ROLE_KEY: "service-role-key",
   DATABASE_URL: "postgresql://user:pass@host:6543/postgres",
   DIRECT_URL: "postgresql://user:pass@host:5432/postgres",
+  ANTHROPIC_API_KEY: "sk-ant-test",
+  OPENAI_API_KEY: "sk-openai-test",
+  FIRECRAWL_API_KEY: "fc-test",
 };
 
 describe("client env", () => {
@@ -44,6 +47,18 @@ describe("server env", () => {
   it("parses a valid server environment", () => {
     const env = parseServerEnv(validServer);
     expect(env.SUPABASE_SERVICE_ROLE_KEY).toBe("service-role-key");
+  });
+
+  it("defaults the reasoning model to claude-opus-4-8", () => {
+    const env = parseServerEnv(validServer);
+    expect(env.ANTHROPIC_MODEL).toBe("claude-opus-4-8");
+    expect(env.OPENAI_EMBEDDING_MODEL).toBe("text-embedding-3-small");
+  });
+
+  it("rejects a missing Anthropic key", () => {
+    const { ANTHROPIC_API_KEY: _omit, ...rest } = validServer;
+    void _omit;
+    expect(() => parseServerEnv(rest)).toThrow(/Invalid server environment/);
   });
 
   it("rejects a missing service role key", () => {

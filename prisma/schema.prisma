@@ -1,6 +1,14 @@
 // Sightline — Prisma schema
-// Phase 0: identity & tenancy only (Profile, Organization, Membership).
-// Domain tables (competitors, sources, changes, …) arrive in later phases.
+// Phase 0: identity & tenancy (Profile, Organization, Membership).
+// Phase 1: the core loop (Competitor, Source, SourceSnapshot, Change,
+//          IntelChunk, AiRun).
+//
+// Multi-tenancy: every domain table carries a scalar `org_id`. We deliberately
+// do NOT model an Organization relation on domain tables — Prisma connects as a
+// privileged role that bypasses RLS, so isolation here is enforced in app code
+// (see src/lib/org-scope.ts) by always filtering on the resolved org_id. The
+// `intel_chunks.embedding` pgvector column and all RLS live in
+// prisma/sql/0002_phase1.sql.
 
 generator client {
   provider = "prisma-client-js"
@@ -61,4 +69,158 @@ model Membership {
   @@unique([orgId, userId])
   @@index([userId])
   @@map("memberships")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Phase 1 — the core loop
+// ─────────────────────────────────────────────────────────────
+
+enum SourceType {
+  pricing
+  changelog
+  blog
+  news
+  careers
+  custom
+}
+
+enum ChangeCategory {
+  pricing
+  product
+  positioning
+  hiring
+  funding
+  other
+}
+
+enum ImpactLevel {
+  low
+  medium
+  high
+}
+
+enum ChangeStatus {
+  new
+  reviewed
+  dismissed
+  promoted
+}
+
+enum AiRunType {
+  change_analyze
+  ask
+  embed
+}
+
+/// A competitor an org is tracking.
+model Competitor {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orgId     String   @map("org_id") @db.Uuid
+  name      String
+  domain    String?
+  logoUrl   String?  @map("logo_url")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  sources Source[]
+  changes Change[]
+
+  @@index([orgId])
+  @@map("competitors")
+}
+
+/// A monitored public page belonging to a competitor.
+model Source {
+  id            String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orgId         String     @map("org_id") @db.Uuid
+  competitorId  String     @map("competitor_id") @db.Uuid
+  type          SourceType
+  url           String
+  scanFrequency String     @default("manual") @map("scan_frequency")
+  isActive      Boolean    @default(true) @map("is_active")
+  lastScannedAt DateTime?  @map("last_scanned_at") @db.Timestamptz(6)
+  createdAt     DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  competitor Competitor       @relation(fields: [competitorId], references: [id], onDelete: Cascade)
+  snapshots  SourceSnapshot[]
+  changes    Change[]
+
+  @@index([orgId])
+  @@index([competitorId])
+  @@map("sources")
+}
+
+/// A point-in-time capture of a source's normalized content.
+model SourceSnapshot {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orgId       String   @map("org_id") @db.Uuid
+  sourceId    String   @map("source_id") @db.Uuid
+  contentText String   @map("content_text")
+  contentHash String   @map("content_hash")
+  rawUrl      String?  @map("raw_url")
+  fetchedAt   DateTime @default(now()) @map("fetched_at") @db.Timestamptz(6)
+
+  source Source @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([sourceId, fetchedAt(sort: Desc)])
+  @@map("source_snapshots")
+}
+
+/// A meaningful, AI-summarized change detected between two snapshots.
+model Change {
+  id               String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orgId            String         @map("org_id") @db.Uuid
+  competitorId     String         @map("competitor_id") @db.Uuid
+  sourceId         String         @map("source_id") @db.Uuid
+  summary          String
+  whyItMatters     String         @map("why_it_matters")
+  category         ChangeCategory
+  impact           ImpactLevel
+  confidence       Float
+  diffExcerpt      String?        @map("diff_excerpt")
+  snapshotBeforeId String?        @map("snapshot_before_id") @db.Uuid
+  snapshotAfterId  String?        @map("snapshot_after_id") @db.Uuid
+  status           ChangeStatus   @default(new)
+  detectedAt       DateTime       @default(now()) @map("detected_at") @db.Timestamptz(6)
+
+  competitor Competitor @relation(fields: [competitorId], references: [id], onDelete: Cascade)
+  source     Source     @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, detectedAt(sort: Desc)])
+  @@index([competitorId])
+  @@map("changes")
+}
+
+/// A chunk of collected intel, embedded for RAG retrieval.
+/// The `embedding vector(1536)` column + HNSW index are added in
+/// prisma/sql/0002_phase1.sql (pgvector is not a native Prisma type).
+model IntelChunk {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orgId           String   @map("org_id") @db.Uuid
+  competitorId    String   @map("competitor_id") @db.Uuid
+  sourceSnapshotId String  @map("source_snapshot_id") @db.Uuid
+  content         String
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([orgId])
+  @@map("intel_chunks")
+}
+
+/// Audit + cost record for every AI call (decision-support, measurable).
+model AiRun {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orgId        String    @map("org_id") @db.Uuid
+  type         AiRunType
+  model        String
+  inputTokens  Int       @default(0) @map("input_tokens")
+  outputTokens Int       @default(0) @map("output_tokens")
+  costUsd      Decimal   @default(0) @map("cost_usd") @db.Decimal(12, 6)
+  latencyMs    Int       @default(0) @map("latency_ms")
+  status       String    @default("success")
+  traceId      String?   @map("trace_id")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([orgId, createdAt(sort: Desc)])
+  @@map("ai_runs")
 }
