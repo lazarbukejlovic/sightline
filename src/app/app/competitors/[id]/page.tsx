@@ -9,6 +9,8 @@ import { REVIEW_CONFIDENCE_THRESHOLD } from "@/lib/constants";
 import { AddSourceForm } from "@/app/app/_components/add-source-form";
 import { ScanButton } from "@/app/app/_components/scan-button";
 import { AskSightline } from "@/app/app/_components/ask-sightline";
+import { Button } from "@/components/ui/button";
+import { openBattlecard } from "@/app/app/actions";
 
 export const dynamic = "force-dynamic";
 
@@ -81,20 +83,28 @@ export default async function CompetitorPage({
         >
           ← Intel Feed
         </Link>
-        <div className="mt-3 flex items-center gap-3">
-          <span className="flex size-12 items-center justify-center rounded-lg bg-secondary font-display text-lg">
-            {initials(competitor.name)}
-          </span>
-          <div>
-            <h1 className="font-display text-4xl tracking-tight">
-              {competitor.name}
-            </h1>
-            {competitor.domain && (
-              <p className="font-meta text-xs text-muted-foreground">
-                {competitor.domain}
-              </p>
-            )}
+        <div className="mt-3 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <span className="flex size-12 items-center justify-center rounded-lg bg-secondary font-display text-lg">
+              {initials(competitor.name)}
+            </span>
+            <div>
+              <h1 className="font-display text-4xl tracking-tight">
+                {competitor.name}
+              </h1>
+              {competitor.domain && (
+                <p className="font-meta text-xs text-muted-foreground">
+                  {competitor.domain}
+                </p>
+              )}
+            </div>
           </div>
+          <form action={openBattlecard}>
+            <input type="hidden" name="competitorId" value={competitor.id} />
+            <Button type="submit" variant="outline" size="sm">
+              Open battlecard →
+            </Button>
+          </form>
         </div>
       </div>
 

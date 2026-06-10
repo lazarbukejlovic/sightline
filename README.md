@@ -11,7 +11,32 @@ This repository is being built **phase by phase**. See
 
 ---
 
-## Status — Phase 2: Agentic + scheduled ✅
+## Status — Phase 3: Real-time collaboration ✅
+
+Phases 0–2 plus Phase 3 (collaborative battlecards, comments, assignments,
+role enforcement, suggest→approve) are complete.
+
+**Phase 3 — Real-time collaboration**
+
+- **Collaborative battlecards** per competitor on **Liveblocks + Yjs**: a
+  CodeMirror editor with conflict-free concurrent editing, **live cursors**,
+  and a **presence avatar stack**. Rooms are org-namespaced
+  (`org:{orgId}:battlecard:{id}`) and the auth endpoint only ever grants the
+  caller access to their **own org's** room pattern — tenant-isolated.
+- **Comments** on changes (Review Queue) and on battlecards.
+- **Assignment**: a change can be assigned to a teammate.
+- **Role enforcement, server-side**: Owner/Admin/Member can edit; **Viewer is
+  read-only** — enforced in the Liveblocks token (READ vs FULL access), in
+  every server action (`assertAtLeast("member")`), and in the editor
+  (`EditorState.readOnly`).
+- **battlecard.suggest**: a high-impact change drafts a **pending** battlecard
+  edit; a human **approves** (which inserts it into the editor) or **rejects** —
+  never auto-applied.
+
+> Not yet built: Stripe billing, AI cost dashboard UI, evals-in-CI, self-hosted
+> Yjs (Hocuspocus).
+
+---
 
 Phase 0 (foundation) + Phase 1 (core loop) + Phase 2 (scheduled monitoring,
 review queue, weekly digest, tracing) are complete.
@@ -97,6 +122,7 @@ Supabase project and these values in `.env.local`:
 | `ANTHROPIC_API_KEY`             | console.anthropic.com (reasoning) |
 | `OPENAI_API_KEY`                | platform.openai.com — **optional**, embeddings only (see below) |
 | `FIRECRAWL_API_KEY`             | firecrawl.dev (public-page fetching) |
+| `LIVEBLOCKS_SECRET_KEY`         | liveblocks.io → project → API keys (collaboration; optional for build) |
 
 > **OpenAI is optional.** Without it (or when it's out of quota), the full scan
 > loop still runs — Firecrawl fetch, snapshot, hash, and the Anthropic change
@@ -118,6 +144,9 @@ psql "$DIRECT_URL" -f prisma/sql/0002_phase1.sql
 
 # 4. Apply RLS for the Phase 2 `digests` table.
 psql "$DIRECT_URL" -f prisma/sql/0003_phase2.sql
+
+# 5. Apply RLS for the Phase 3 collaboration tables.
+psql "$DIRECT_URL" -f prisma/sql/0004_phase3.sql
 ```
 
 > No `psql`? Paste each `prisma/sql/*.sql` file into the Supabase **SQL editor**

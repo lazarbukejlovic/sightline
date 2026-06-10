@@ -8,6 +8,7 @@ import {
   diffExcerpt,
 } from "@/lib/text/normalize";
 import { analyzeChange } from "@/lib/ai/analyze";
+import { maybeSuggestBattlecard } from "@/lib/ai/suggest";
 import {
   embedTexts,
   toVectorLiteral,
@@ -164,6 +165,21 @@ export async function analyzeAndStoreChange(
     },
     select: { id: true },
   });
+
+  // High-impact changes draft a PENDING battlecard suggestion (human-approved,
+  // never auto-applied). Non-throwing so it can't break this idempotent step or
+  // duplicate the change above.
+  if (analysis.impact === "high") {
+    await maybeSuggestBattlecard({
+      orgId,
+      competitorId: capture.meta.competitorId,
+      competitorName: capture.meta.competitorName,
+      changeId: change.id,
+      summary: analysis.summary,
+      whyItMatters: analysis.whyItMatters,
+      category: analysis.category,
+    });
+  }
 
   return { changeId: change.id, meaningful: true, confidence: analysis.confidence };
 }

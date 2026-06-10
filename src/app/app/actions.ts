@@ -1,11 +1,14 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
+import type { Route } from "next";
 import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
 import { requireOrgContext } from "@/lib/org/context";
 import { assertAtLeast } from "@/lib/org-scope";
 import { scanSource as runScan } from "@/lib/scan";
+import { ensureBattlecard } from "@/lib/battlecard";
 
 export interface ActionState {
   error?: string;
@@ -177,5 +180,203 @@ export async function reviewChange(
       parsed.data.decision === "reviewed"
         ? "Marked reviewed — moved to the Intel Feed."
         : "Dismissed.",
+  };
+}
+
+// ─────────────────────────────────────────────────────────────
+// Phase 3 — collaboration
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Open (creating on first use) a competitor's battlecard, then redirect to it.
+ * Creating requires member+; viewers may open an existing one.
+ */
+export async function openBattlecard(formData: FormData): Promise<void> {
+  const { orgId, role } = await requireOrgContext();
+  const competitorId = z.string().uuid().safeParse(formData.get("competitorId"));
+  if (!competitorId.success) redirect("/app");
+
+  const competitor = await prisma.competitor.findFirst({
+    where: { id: competitorId.data, orgId },
+    select: { id: true, name: true },
+  });
+  if (!competitor) redirect("/app");
+
+  const existing = await prisma.battlecard.findUnique({
+    where: { orgId_competitorId: { orgId, competitorId: competitor.id } },
+    select: { id: true },
+  });
+
+  let battlecardId: string;
+  if (existing) {
+    battlecardId = existing.id;
+  } else {
+    // Only editors may create the battlecard.
+    assertAtLeast(role, "member");
+    const created = await ensureBattlecard(
+      orgId,
+      competitor.id,
+      `${competitor.name} battlecard`,
+    );
+    battlecardId = created.id;
+  }
+
+  redirect(`/app/battlecards/${battlecardId}` as Route);
+}
+
+const commentSchema = z.object({
+  targetType: z.enum(["change", "battlecard"]),
+  targetId: z.string().uuid(),
+  body: z.string().trim().min(1, "Write a comment.").max(2000),
+});
+
+export async function addComment(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const { user, orgId, role } = await requireOrgContext();
+  try {
+    assertAtLeast(role, "member");
+  } catch {
+    return { error: "Viewers can read but not comment." };
+  }
+
+  const parsed = commentSchema.safeParse({
+    targetType: formData.get("targetType"),
+    targetId: formData.get("targetId"),
+    body: formData.get("body"),
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid comment." };
+  }
+
+  // Verify the target belongs to this org before attaching a comment.
+  const target =
+    parsed.data.targetType === "change"
+      ? await prisma.change.findFirst({
+          where: { id: parsed.data.targetId, orgId },
+          select: { id: true },
+        })
+      : await prisma.battlecard.findFirst({
+          where: { id: parsed.data.targetId, orgId },
+          select: { id: true },
+        });
+  if (!target) return { error: "Target not found in this organization." };
+
+  await prisma.comment.create({
+    data: {
+      orgId,
+      targetType: parsed.data.targetType,
+      targetId: parsed.data.targetId,
+      authorId: user.id,
+      body: parsed.data.body,
+    },
+  });
+
+  if (parsed.data.targetType === "change") revalidatePath("/app/review");
+  else revalidatePath(`/app/battlecards/${parsed.data.targetId}`);
+  return { message: "Comment added." };
+}
+
+const assignSchema = z.object({
+  changeId: z.string().uuid(),
+  assigneeId: z.string().uuid(),
+});
+
+export async function assignChange(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const { user, orgId, role } = await requireOrgContext();
+  try {
+    assertAtLeast(role, "member");
+  } catch {
+    return { error: "Viewers can't assign changes." };
+  }
+
+  const parsed = assignSchema.safeParse({
+    changeId: formData.get("changeId"),
+    assigneeId: formData.get("assigneeId"),
+  });
+  if (!parsed.success) return { error: "Invalid assignment." };
+
+  const [change, assignee] = await Promise.all([
+    prisma.change.findFirst({
+      where: { id: parsed.data.changeId, orgId },
+      select: { id: true },
+    }),
+    prisma.membership.findFirst({
+      where: { orgId, userId: parsed.data.assigneeId },
+      select: { userId: true },
+    }),
+  ]);
+  if (!change) return { error: "Change not found in this organization." };
+  if (!assignee) return { error: "Assignee is not a member of this org." };
+
+  await prisma.assignment.upsert({
+    where: { changeId: parsed.data.changeId },
+    create: {
+      orgId,
+      changeId: parsed.data.changeId,
+      assigneeId: parsed.data.assigneeId,
+      assignedById: user.id,
+      status: "open",
+    },
+    update: {
+      assigneeId: parsed.data.assigneeId,
+      assignedById: user.id,
+      status: "open",
+    },
+  });
+
+  revalidatePath("/app/review");
+  return { message: "Assigned." };
+}
+
+const resolveSuggestionSchema = z.object({
+  suggestionId: z.string().uuid(),
+  decision: z.enum(["approved", "rejected"]),
+  battlecardId: z.string().uuid(),
+});
+
+/**
+ * Resolve a pending battlecard suggestion. The DB row is marked approved or
+ * rejected here; on approval the client inserts the text into the editor (a
+ * human action) — suggestions are NEVER auto-applied server-side.
+ */
+export async function resolveSuggestion(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const { user, orgId, role } = await requireOrgContext();
+  try {
+    assertAtLeast(role, "member");
+  } catch {
+    return { error: "Viewers can't resolve suggestions." };
+  }
+
+  const parsed = resolveSuggestionSchema.safeParse({
+    suggestionId: formData.get("suggestionId"),
+    decision: formData.get("decision"),
+    battlecardId: formData.get("battlecardId"),
+  });
+  if (!parsed.success) return { error: "Invalid action." };
+
+  const result = await prisma.battlecardSuggestion.updateMany({
+    where: { id: parsed.data.suggestionId, orgId, status: "pending" },
+    data: {
+      status: parsed.data.decision,
+      resolvedById: user.id,
+      resolvedAt: new Date(),
+    },
+  });
+  if (result.count === 0) {
+    return { error: "Suggestion not found or already resolved." };
+  }
+
+  revalidatePath(`/app/battlecards/${parsed.data.battlecardId}`);
+  return {
+    message:
+      parsed.data.decision === "approved" ? "Approved." : "Rejected.",
   };
 }

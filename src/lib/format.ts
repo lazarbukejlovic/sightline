@@ -21,6 +21,25 @@ export function relativeTime(date: Date, now: Date = new Date()): string {
   return `${Math.floor(months / 12)}y ago`;
 }
 
+/** Deterministic, pleasant presence color from a stable id (e.g. user id). */
+export function userColor(id: string): string {
+  const palette = [
+    "#E5484D", // signal red
+    "#137A6E", // teal
+    "#F5A524", // amber
+    "#3E63DD", // indigo
+    "#8E4EC6", // violet
+    "#D6409F", // magenta
+    "#0091FF", // blue
+    "#30A46C", // green
+  ];
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) {
+    hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
+  }
+  return palette[hash % palette.length]!;
+}
+
 /** Bare hostname for display, from a URL. */
 export function displayHost(url: string): string {
   try {

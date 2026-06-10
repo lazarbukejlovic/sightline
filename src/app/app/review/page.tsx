@@ -1,16 +1,24 @@
 import type { Metadata } from "next";
 import { prisma } from "@/lib/db/prisma";
 import { requireOrgContext } from "@/lib/org/context";
+import { listOrgMembers } from "@/lib/org/members";
 import { REVIEW_CONFIDENCE_THRESHOLD } from "@/lib/constants";
+import { canEdit as roleCanEdit } from "@/lib/liveblocks/rooms";
 import { ConfidenceMeter } from "@/components/confidence-meter";
 import { initials, relativeTime, displayHost } from "@/lib/format";
 import { ReviewActions } from "@/app/app/_components/review-actions";
+import { AssignControl } from "@/app/app/_components/assign-control";
+import {
+  CommentsPanel,
+  type CommentView,
+} from "@/app/app/_components/comments-panel";
 
 export const metadata: Metadata = { title: "Review Queue · Sightline" };
 export const dynamic = "force-dynamic";
 
 export default async function ReviewQueuePage() {
-  const { orgId } = await requireOrgContext();
+  const { orgId, role } = await requireOrgContext();
+  const canEdit = roleCanEdit(role);
 
   // Low-confidence, still-new changes await a human decision. AI is
   // decision-support, never the final authority.
@@ -26,6 +34,37 @@ export default async function ReviewQueuePage() {
       source: { select: { url: true, type: true } },
     },
   });
+
+  const changeIds = items.map((c) => c.id);
+  const [members, assignments, commentRows] = await Promise.all([
+    listOrgMembers(orgId),
+    changeIds.length
+      ? prisma.assignment.findMany({
+          where: { orgId, changeId: { in: changeIds } },
+        })
+      : Promise.resolve([]),
+    changeIds.length
+      ? prisma.comment.findMany({
+          where: { orgId, targetType: "change", targetId: { in: changeIds } },
+          orderBy: { createdAt: "asc" },
+        })
+      : Promise.resolve([]),
+  ]);
+
+  const nameById = new Map(members.map((m) => [m.userId, m.name]));
+  const assignmentByChange = new Map(assignments.map((a) => [a.changeId, a]));
+  const commentsByChange = new Map<string, CommentView[]>();
+  for (const c of commentRows) {
+    const list = commentsByChange.get(c.targetId) ?? [];
+    list.push({
+      id: c.id,
+      authorName: nameById.get(c.authorId) ?? "Teammate",
+      body: c.body,
+      createdAt: c.createdAt.toISOString(),
+    });
+    commentsByChange.set(c.targetId, list);
+  }
+  const memberOptions = members.map((m) => ({ userId: m.userId, name: m.name }));
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-6">
@@ -86,6 +125,34 @@ export default async function ReviewQueuePage() {
               <div className="mt-4 flex items-center justify-between gap-4">
                 <ConfidenceMeter value={c.confidence} animate={false} />
                 <ReviewActions changeId={c.id} />
+              </div>
+
+              {canEdit && (
+                <div className="mt-4 border-t border-border pt-4">
+                  <AssignControl
+                    changeId={c.id}
+                    members={memberOptions}
+                    currentAssigneeId={
+                      assignmentByChange.get(c.id)?.assigneeId ?? null
+                    }
+                    currentAssigneeName={
+                      assignmentByChange.get(c.id)
+                        ? (nameById.get(
+                            assignmentByChange.get(c.id)!.assigneeId,
+                          ) ?? null)
+                        : null
+                    }
+                  />
+                </div>
+              )}
+
+              <div className="mt-4 border-t border-border pt-4">
+                <CommentsPanel
+                  targetType="change"
+                  targetId={c.id}
+                  comments={commentsByChange.get(c.id) ?? []}
+                  canComment={canEdit}
+                />
               </div>
             </li>
           ))}

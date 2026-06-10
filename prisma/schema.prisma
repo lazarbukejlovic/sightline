@@ -111,6 +111,7 @@ enum AiRunType {
   ask
   embed
   digest
+  battlecard_suggest
 }
 
 /// A competitor an org is tracking.
@@ -256,4 +257,98 @@ model Digest {
   @@unique([orgId, periodStart])
   @@index([orgId, periodEnd(sort: Desc)])
   @@map("digests")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Phase 3 — collaboration (battlecards, comments, assignments)
+// ─────────────────────────────────────────────────────────────
+
+enum BattlecardStatus {
+  draft
+  published
+}
+
+enum CommentTarget {
+  change
+  battlecard
+}
+
+enum AssignmentStatus {
+  open
+  done
+}
+
+enum SuggestionStatus {
+  pending
+  approved
+  rejected
+}
+
+/// One collaborative battlecard per competitor. The document body lives in a
+/// Liveblocks/Yjs room (`roomId`); the DB holds metadata only. `roomId` is
+/// org-namespaced for tenant isolation (see src/lib/liveblocks/rooms.ts).
+model Battlecard {
+  id           String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orgId        String           @map("org_id") @db.Uuid
+  competitorId String           @map("competitor_id") @db.Uuid
+  title        String
+  roomId       String           @unique @map("room_id")
+  status       BattlecardStatus @default(draft)
+  updatedById  String?          @map("updated_by_id") @db.Uuid
+  createdAt    DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  suggestions BattlecardSuggestion[]
+
+  @@unique([orgId, competitorId])
+  @@index([orgId])
+  @@map("battlecards")
+}
+
+/// A comment on a change or a battlecard.
+model Comment {
+  id         String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orgId      String        @map("org_id") @db.Uuid
+  targetType CommentTarget @map("target_type")
+  targetId   String        @map("target_id") @db.Uuid
+  authorId   String        @map("author_id") @db.Uuid
+  body       String
+  createdAt  DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([orgId, targetType, targetId, createdAt])
+  @@map("comments")
+}
+
+/// Assignment of a change to a teammate. One active assignment per change.
+model Assignment {
+  id           String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orgId        String           @map("org_id") @db.Uuid
+  changeId     String           @unique @map("change_id") @db.Uuid
+  assigneeId   String           @map("assignee_id") @db.Uuid
+  assignedById String?          @map("assigned_by_id") @db.Uuid
+  status       AssignmentStatus @default(open)
+  createdAt    DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([orgId, assigneeId])
+  @@map("assignments")
+}
+
+/// A pending, AI-drafted battlecard edit produced from a high-impact change.
+/// NEVER auto-applied — a human approves (applies in the editor) or rejects.
+model BattlecardSuggestion {
+  id           String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orgId        String           @map("org_id") @db.Uuid
+  battlecardId String           @map("battlecard_id") @db.Uuid
+  competitorId String           @map("competitor_id") @db.Uuid
+  changeId     String?          @map("change_id") @db.Uuid
+  content      String
+  status       SuggestionStatus @default(pending)
+  resolvedById String?          @map("resolved_by_id") @db.Uuid
+  resolvedAt   DateTime?        @map("resolved_at") @db.Timestamptz(6)
+  createdAt    DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  battlecard Battlecard @relation(fields: [battlecardId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, battlecardId, status])
+  @@map("battlecard_suggestions")
 }

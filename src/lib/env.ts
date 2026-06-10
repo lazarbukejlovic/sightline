@@ -34,6 +34,10 @@ const serverSchema = z.object({
   LANGFUSE_SECRET_KEY: z.string().min(1).optional(),
   LANGFUSE_PUBLIC_KEY: z.string().min(1).optional(),
   LANGFUSE_BASEURL: z.string().url().optional(),
+  // Phase 3 — real-time collaboration (Liveblocks). OPTIONAL for build/tests;
+  // required at runtime to open battlecard rooms (the editor degrades to a
+  // clean "collaboration unavailable" notice when unset).
+  LIVEBLOCKS_SECRET_KEY: z.string().min(1).optional(),
 });
 
 export type ClientEnv = z.infer<typeof clientSchema>;
