@@ -110,6 +110,7 @@ enum AiRunType {
   change_analyze
   ask
   embed
+  digest
 }
 
 /// A competitor an org is tracking.
@@ -136,7 +137,9 @@ model Source {
   competitorId  String     @map("competitor_id") @db.Uuid
   type          SourceType
   url           String
-  scanFrequency String     @default("manual") @map("scan_frequency")
+  // Phase 2: scheduled monitoring. "daily" | "weekly" | "manual" (never auto).
+  // Defaults to daily; a 12h hard floor is enforced in code regardless.
+  scanFrequency String     @default("daily") @map("scan_frequency")
   isActive      Boolean    @default(true) @map("is_active")
   lastScannedAt DateTime?  @map("last_scanned_at") @db.Timestamptz(6)
   createdAt     DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -193,15 +196,26 @@ model Change {
 }
 
 /// A chunk of collected intel, embedded for RAG retrieval.
-/// The `embedding vector(1536)` column + HNSW index are added in
-/// prisma/sql/0002_phase1.sql (pgvector is not a native Prisma type).
+///
+/// `embedding` is a pgvector column (not a native Prisma type), so it is modeled
+/// as `Unsupported("vector(1536)")?`. This is intentional and load-bearing:
+///   - it makes Prisma aware the column EXISTS, so `prisma db push` / migrate
+///     will NOT drop it (and will not warn about data loss);
+///   - Prisma leaves the column's HNSW index (created in 0002_phase1.sql) alone,
+///     because it can't manage indexes on Unsupported columns;
+///   - the field is omitted from the generated client — we read/write it via
+///     raw SQL ($queryRawUnsafe / $executeRawUnsafe) in src/lib/ai/ask.ts and
+///     src/lib/scan.ts, which is unchanged.
+/// The column + index are still defined in prisma/sql/0002_phase1.sql for fresh
+/// databases.
 model IntelChunk {
-  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  orgId           String   @map("org_id") @db.Uuid
-  competitorId    String   @map("competitor_id") @db.Uuid
-  sourceSnapshotId String  @map("source_snapshot_id") @db.Uuid
-  content         String
-  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  id               String                       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orgId            String                       @map("org_id") @db.Uuid
+  competitorId     String                       @map("competitor_id") @db.Uuid
+  sourceSnapshotId String                       @map("source_snapshot_id") @db.Uuid
+  content          String
+  embedding        Unsupported("vector(1536)")?
+  createdAt        DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
 
   @@index([orgId])
   @@map("intel_chunks")
@@ -223,4 +237,23 @@ model AiRun {
 
   @@index([orgId, createdAt(sort: Desc)])
   @@map("ai_runs")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Phase 2 — scheduled monitoring artifacts
+// ─────────────────────────────────────────────────────────────
+
+/// A per-org weekly summary of detected changes (in-app digest).
+model Digest {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orgId       String   @map("org_id") @db.Uuid
+  periodStart DateTime @map("period_start") @db.Timestamptz(6)
+  periodEnd   DateTime @map("period_end") @db.Timestamptz(6)
+  summary     String
+  changeCount Int      @default(0) @map("change_count")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([orgId, periodStart])
+  @@index([orgId, periodEnd(sort: Desc)])
+  @@map("digests")
 }

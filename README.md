@@ -11,7 +11,31 @@ This repository is being built **phase by phase**. See
 
 ---
 
-## Status — Phase 1: Core loop ✅
+## Status — Phase 2: Agentic + scheduled ✅
+
+Phase 0 (foundation) + Phase 1 (core loop) + Phase 2 (scheduled monitoring,
+review queue, weekly digest, tracing) are complete.
+
+**Phase 2 — Agentic + scheduled**
+
+- **Inngest** scheduled monitoring: an hourly cron fans out a durable scan job
+  per **due** source (respecting its `scan_frequency` + a hard **12h floor**).
+  Manual "Scan now" still works. Scan stages are separate `step.run`s so a
+  retry can't double-charge the AI APIs; an **unchanged content hash skips the
+  analyze/embed steps entirely** (no change = no spend).
+- **Review Queue**: changes with confidence `< 0.6` stay out of the feed and
+  surface at `/app/review` for a human to **mark reviewed** or **dismiss**.
+  AI is decision-support, never auto-authoritative.
+- **Weekly digest** (Inngest cron, Mondays 09:00 UTC): per-org summary of the
+  week's changes → `digests`, shown at `/app/digests`.
+- **Langfuse** tracing on every AI call (traces, cost, latency), alongside the
+  existing `ai_runs` logging; the Ask cost line is in the UI. Optional —
+  no-ops when unconfigured.
+
+> Not yet built (later phases): Liveblocks/Yjs battlecards, Stripe billing,
+> the AI cost dashboard UI, evals-in-CI.
+
+---
 
 Phase 0 (foundation) + Phase 1 (the demoable core loop) are complete.
 
@@ -91,10 +115,27 @@ psql "$DIRECT_URL" -f prisma/sql/0001_rls_and_triggers.sql
 
 # 3. Apply pgvector + embedding column + HNSW index + Phase 1 RLS.
 psql "$DIRECT_URL" -f prisma/sql/0002_phase1.sql
+
+# 4. Apply RLS for the Phase 2 `digests` table.
+psql "$DIRECT_URL" -f prisma/sql/0003_phase2.sql
 ```
 
 > No `psql`? Paste each `prisma/sql/*.sql` file into the Supabase **SQL editor**
 > and run it. The SQL files are idempotent.
+
+### Background jobs (Inngest)
+
+In local dev, run the Inngest dev server alongside `npm run dev` (no keys
+needed):
+
+```bash
+npx inngest-cli@latest dev -u http://localhost:3000/api/inngest
+```
+
+Open the Inngest dev dashboard (http://localhost:8288) to see the
+`scheduled-scan`, `scan-source`, and `weekly-digest` functions and to invoke
+them manually. In production, set `INNGEST_EVENT_KEY` / `INNGEST_SIGNING_KEY`
+and register `/api/inngest` from the Inngest dashboard.
 
 ## Scripts
 

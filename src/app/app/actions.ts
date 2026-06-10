@@ -132,3 +132,50 @@ export async function scanSource(
     return { error: `Scan failed: ${detail}` };
   }
 }
+
+const reviewSchema = z.object({
+  changeId: z.string().uuid(),
+  decision: z.enum(["reviewed", "dismissed"]),
+});
+
+/**
+ * Resolve a Review Queue item: mark a low-confidence change as reviewed
+ * (keep it) or dismissed (hide it). Org-scoped and role-gated.
+ */
+export async function reviewChange(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const { orgId, role } = await requireOrgContext();
+  try {
+    assertAtLeast(role, "member");
+  } catch {
+    return { error: "You don't have permission to review changes." };
+  }
+
+  const parsed = reviewSchema.safeParse({
+    changeId: formData.get("changeId"),
+    decision: formData.get("decision"),
+  });
+  if (!parsed.success) {
+    return { error: "Invalid review action." };
+  }
+
+  // Scope by org_id so a client can never resolve another org's change.
+  const result = await prisma.change.updateMany({
+    where: { id: parsed.data.changeId, orgId },
+    data: { status: parsed.data.decision },
+  });
+  if (result.count === 0) {
+    return { error: "Change not found in this organization." };
+  }
+
+  revalidatePath("/app/review");
+  revalidatePath("/app");
+  return {
+    message:
+      parsed.data.decision === "reviewed"
+        ? "Marked reviewed — moved to the Intel Feed."
+        : "Dismissed.",
+  };
+}

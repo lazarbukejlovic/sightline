@@ -95,7 +95,9 @@ export async function POST(request: NextRequest) {
         // No temperature/top_p — rejected by Opus 4.x.
         const result = streamText({ model: reasoningModel(), system, prompt });
 
+        let fullText = "";
         for await (const delta of result.textStream) {
+          fullText += delta;
           send({ type: "text", text: delta });
         }
 
@@ -111,6 +113,9 @@ export async function POST(request: NextRequest) {
           inputTokens,
           outputTokens,
           latencyMs: Date.now() - startedAt,
+          input: question,
+          output: fullText,
+          metadata: { sources: citations.length, competitorId },
         });
 
         send({

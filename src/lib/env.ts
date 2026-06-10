@@ -26,6 +26,14 @@ const serverSchema = z.object({
   OPENAI_API_KEY: z.string().min(1).optional(),
   OPENAI_EMBEDDING_MODEL: z.string().min(1).default("text-embedding-3-small"),
   FIRECRAWL_API_KEY: z.string().min(1),
+  // Phase 2 — background jobs (Inngest). Optional in local dev (the Inngest
+  // dev server needs no keys); required in production to sign/serve.
+  INNGEST_EVENT_KEY: z.string().min(1).optional(),
+  INNGEST_SIGNING_KEY: z.string().min(1).optional(),
+  // Phase 2 — LLM observability (Langfuse). OPTIONAL; tracing no-ops when unset.
+  LANGFUSE_SECRET_KEY: z.string().min(1).optional(),
+  LANGFUSE_PUBLIC_KEY: z.string().min(1).optional(),
+  LANGFUSE_BASEURL: z.string().url().optional(),
 });
 
 export type ClientEnv = z.infer<typeof clientSchema>;

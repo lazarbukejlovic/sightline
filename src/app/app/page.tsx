@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db/prisma";
 import { requireOrgContext } from "@/lib/org/context";
 import { ChangeCard, type ChangeCardData } from "@/components/change-card";
 import { initials, relativeTime, displayHost } from "@/lib/format";
+import { REVIEW_CONFIDENCE_THRESHOLD } from "@/lib/constants";
 import { AddCompetitorForm } from "./_components/add-competitor-form";
 import { AskSightline } from "./_components/ask-sightline";
 
@@ -20,7 +21,16 @@ export default async function WorkspacePage() {
       include: { _count: { select: { sources: true, changes: true } } },
     }),
     prisma.change.findMany({
-      where: { orgId },
+      // Feed = not dismissed, and either confident enough or already reviewed.
+      // Low-confidence, still-new items live in the Review Queue instead.
+      where: {
+        orgId,
+        status: { not: "dismissed" },
+        OR: [
+          { confidence: { gte: REVIEW_CONFIDENCE_THRESHOLD } },
+          { status: { in: ["reviewed", "promoted"] } },
+        ],
+      },
       orderBy: { detectedAt: "desc" },
       take: 25,
       include: {

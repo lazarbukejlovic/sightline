@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db/prisma";
 import { requireOrgContext } from "@/lib/org/context";
 import { ChangeCard, type ChangeCardData } from "@/components/change-card";
 import { initials, relativeTime, displayHost } from "@/lib/format";
+import { REVIEW_CONFIDENCE_THRESHOLD } from "@/lib/constants";
 import { AddSourceForm } from "@/app/app/_components/add-source-form";
 import { ScanButton } from "@/app/app/_components/scan-button";
 import { AskSightline } from "@/app/app/_components/ask-sightline";
@@ -45,7 +46,15 @@ export default async function CompetitorPage({
   if (!competitor) notFound();
 
   const changes = await prisma.change.findMany({
-    where: { orgId, competitorId: competitor.id },
+    where: {
+      orgId,
+      competitorId: competitor.id,
+      status: { not: "dismissed" },
+      OR: [
+        { confidence: { gte: REVIEW_CONFIDENCE_THRESHOLD } },
+        { status: { in: ["reviewed", "promoted"] } },
+      ],
+    },
     orderBy: { detectedAt: "desc" },
     take: 25,
     include: { source: { select: { url: true } } },

@@ -17,43 +17,55 @@ import {
 import { reasoningModelId, embeddingModelId } from "@/lib/ai/models";
 import { logAiRun } from "@/lib/ai/runs";
 
-export interface ScanResult {
-  changed: boolean;
-  meaningful: boolean;
-  changeId: string | null;
-  snapshotId: string | null;
-  /** True when the snapshot was saved but no embeddings were written. */
-  embeddingsSkipped: boolean;
-  message: string;
-}
-
 const MAX_CHUNKS = 20;
 
 const EMBEDDINGS_UNAVAILABLE_NOTE =
   "Embeddings skipped because OpenAI billing/quota is unavailable.";
 
+// ─────────────────────────────────────────────────────────────
+// Composable steps (shared by manual scan + the durable Inngest job).
+// Each is independently retryable; AI-charging steps are only reached when the
+// content hash actually changed, so an unchanged page never costs anything.
+// ─────────────────────────────────────────────────────────────
+
+export interface SourceMeta {
+  competitorId: string;
+  competitorName: string;
+  sourceType: string;
+  sourceUrl: string;
+}
+
+export type CaptureResult =
+  | { kind: "unchanged"; snapshotId: string }
+  | {
+      kind: "captured";
+      snapshotId: string;
+      previousSnapshotId: string | null;
+      isFirstSnapshot: boolean;
+      diff: string;
+      normalized: string;
+      meta: SourceMeta;
+    };
+
 /**
- * Manual "Scan now" for one source. All reads/writes are scoped by `orgId`
- * (app-layer tenancy). Synchronous for Phase 1; Phase 2 moves this to Inngest.
+ * Step 1 — fetch, normalize, hash, and compare against the last snapshot.
+ * On no change, updates `last_scanned_at` and returns early (NO AI spend).
+ * On change, writes a new snapshot and returns the data needed to analyze.
  */
-export async function scanSource(
+export async function captureSnapshot(
   orgId: string,
   sourceId: string,
-): Promise<ScanResult> {
+): Promise<CaptureResult> {
   const source = await prisma.source.findFirst({
     where: { id: sourceId, orgId },
     include: { competitor: { select: { id: true, name: true } } },
   });
-  if (!source) {
-    throw new Error("Source not found in this organization.");
-  }
+  if (!source) throw new Error("Source not found in this organization.");
 
-  // 1. Fetch + normalize + hash.
   const page = await fetchPage(source.url);
   const normalized = normalizeContent(page.text);
   const hash = contentHash(normalized);
 
-  // 2. Compare against the most recent snapshot.
   const previous = await prisma.sourceSnapshot.findFirst({
     where: { sourceId, orgId },
     orderBy: { fetchedAt: "desc" },
@@ -65,25 +77,11 @@ export async function scanSource(
       where: { id: sourceId },
       data: { lastScannedAt: new Date() },
     });
-    return {
-      changed: false,
-      meaningful: false,
-      changeId: null,
-      snapshotId: previous.id,
-      embeddingsSkipped: false,
-      message: "No change since last scan.",
-    };
+    return { kind: "unchanged", snapshotId: previous.id };
   }
 
-  // 3. Store the new snapshot.
   const snapshot = await prisma.sourceSnapshot.create({
-    data: {
-      orgId,
-      sourceId,
-      contentText: normalized,
-      contentHash: hash,
-      rawUrl: source.url,
-    },
+    data: { orgId, sourceId, contentText: normalized, contentHash: hash, rawUrl: source.url },
     select: { id: true },
   });
 
@@ -92,15 +90,46 @@ export async function scanSource(
     ? diffExcerpt(previous.contentText, normalized)
     : normalized.slice(0, 2000);
 
-  // 4. Analyze (structured LLM output) + log the ai_run.
-  const startedAt = Date.now();
-  const { analysis, inputTokens, outputTokens } = await analyzeChange({
-    competitorName: source.competitor.name,
-    sourceType: source.type,
-    sourceUrl: source.url,
+  return {
+    kind: "captured",
+    snapshotId: snapshot.id,
+    previousSnapshotId: previous?.id ?? null,
     isFirstSnapshot,
     diff,
-    afterText: normalized,
+    normalized,
+    meta: {
+      competitorId: source.competitor.id,
+      competitorName: source.competitor.name,
+      sourceType: source.type,
+      sourceUrl: source.url,
+    },
+  };
+}
+
+export interface AnalyzeStepResult {
+  changeId: string | null;
+  meaningful: boolean;
+  confidence: number;
+}
+
+/**
+ * Step 2 — durable analysis. Structured LLM output → `changes` row (when
+ * meaningful). Always logs an `ai_run`. Low confidence (< 0.6) still writes a
+ * change with status=new so it surfaces in the Review Queue.
+ */
+export async function analyzeAndStoreChange(
+  orgId: string,
+  sourceId: string,
+  capture: Extract<CaptureResult, { kind: "captured" }>,
+): Promise<AnalyzeStepResult> {
+  const startedAt = Date.now();
+  const { analysis, inputTokens, outputTokens } = await analyzeChange({
+    competitorName: capture.meta.competitorName,
+    sourceType: capture.meta.sourceType,
+    sourceUrl: capture.meta.sourceUrl,
+    isFirstSnapshot: capture.isFirstSnapshot,
+    diff: capture.diff,
+    afterText: capture.normalized,
   });
   await logAiRun({
     orgId,
@@ -109,77 +138,44 @@ export async function scanSource(
     inputTokens,
     outputTokens,
     latencyMs: Date.now() - startedAt,
+    input: capture.diff,
+    output: analysis.summary,
+    metadata: { sourceId, confidence: analysis.confidence },
   });
 
-  // 5. Create a change card when the model judged the change meaningful.
-  let changeId: string | null = null;
-  if (analysis.isMeaningful) {
-    const change = await prisma.change.create({
-      data: {
-        orgId,
-        competitorId: source.competitor.id,
-        sourceId,
-        summary: analysis.summary,
-        whyItMatters: analysis.whyItMatters,
-        category: analysis.category,
-        impact: analysis.impact,
-        confidence: analysis.confidence,
-        diffExcerpt: previous ? diff : null,
-        snapshotBeforeId: previous?.id ?? null,
-        snapshotAfterId: snapshot.id,
-        status: "new",
-      },
-      select: { id: true },
-    });
-    changeId = change.id;
+  if (!analysis.isMeaningful) {
+    return { changeId: null, meaningful: false, confidence: analysis.confidence };
   }
 
-  // 6. Embed the snapshot delta into intel_chunks (org-scoped).
-  //    Best-effort: embeddings are OPTIONAL and must never fail the scan.
-  const embedded = await embedSnapshot(
-    orgId,
-    source.competitor.id,
-    snapshot.id,
-    normalized,
-  );
-
-  // 7. Mark the source scanned.
-  await prisma.source.update({
-    where: { id: sourceId },
-    data: { lastScannedAt: new Date() },
+  const change = await prisma.change.create({
+    data: {
+      orgId,
+      competitorId: capture.meta.competitorId,
+      sourceId,
+      summary: analysis.summary,
+      whyItMatters: analysis.whyItMatters,
+      category: analysis.category,
+      impact: analysis.impact,
+      confidence: analysis.confidence,
+      diffExcerpt: capture.isFirstSnapshot ? null : capture.diff,
+      snapshotBeforeId: capture.previousSnapshotId,
+      snapshotAfterId: capture.snapshotId,
+      status: "new",
+    },
+    select: { id: true },
   });
 
-  const embeddingsSkipped = !embedded;
-  const note = embeddingsSkipped ? ` ${EMBEDDINGS_UNAVAILABLE_NOTE}` : "";
-
-  let base: string;
-  if (isFirstSnapshot) {
-    base = "Baseline captured.";
-  } else if (analysis.isMeaningful) {
-    base = "Change detected and summarized.";
-  } else {
-    base = "Snapshot captured; no meaningful change to report.";
-  }
-
-  return {
-    changed: true,
-    meaningful: analysis.isMeaningful,
-    changeId,
-    snapshotId: snapshot.id,
-    embeddingsSkipped,
-    message: `${base}${note}`,
-  };
+  return { changeId: change.id, meaningful: true, confidence: analysis.confidence };
 }
 
 /**
- * Embed a snapshot into intel_chunks. OPTIONAL and fully non-blocking:
- *  - if OpenAI isn't configured, skip silently and return false;
- *  - if the embedding call fails (e.g. quota/billing), catch it, log a failed
- *    `ai_run` for observability, and return false.
- * The snapshot is already saved by the caller, so the scan stands on its own.
- * Returns true only when embeddings were actually written.
+ * Step 3 — embed the snapshot into intel_chunks. OPTIONAL and non-blocking:
+ * skips silently when OpenAI is unconfigured; on failure (quota), logs a failed
+ * `ai_run` and returns false. Idempotent: clears any existing chunks for the
+ * snapshot first, so a retry can't create duplicates. Returns true only when
+ * embeddings were written.
  */
-async function embedSnapshot(
+export async function embedSnapshot(
   orgId: string,
   competitorId: string,
   snapshotId: string,
@@ -194,8 +190,11 @@ async function embedSnapshot(
   try {
     const { embeddings, tokens } = await embedTexts(chunks);
 
-    // Parameterized inserts; embedding cast to pgvector. id/created_at use DB
-    // defaults from the schema.
+    // Idempotency: remove any prior chunks for this snapshot before inserting.
+    await prisma.intelChunk.deleteMany({
+      where: { orgId, sourceSnapshotId: snapshotId },
+    });
+
     for (let i = 0; i < chunks.length; i++) {
       const embedding = embeddings[i];
       if (!embedding) continue;
@@ -220,7 +219,6 @@ async function embedSnapshot(
     });
     return true;
   } catch (err) {
-    // Non-fatal. Record the failed run, then carry on.
     const reason = isQuotaError(err) ? "openai_quota" : "embed_error";
     console.warn(`Embeddings skipped (${reason}):`, err);
     await logAiRun({
@@ -234,4 +232,70 @@ async function embedSnapshot(
     });
     return false;
   }
+}
+
+/** Step 4 — mark the source as scanned. */
+export async function markScanned(sourceId: string): Promise<void> {
+  await prisma.source.update({
+    where: { id: sourceId },
+    data: { lastScannedAt: new Date() },
+  });
+}
+
+// ─────────────────────────────────────────────────────────────
+// Manual "Scan now" — synchronous orchestration over the steps above.
+// (The scheduled path runs the same steps as durable Inngest steps.)
+// ─────────────────────────────────────────────────────────────
+
+export interface ScanResult {
+  changed: boolean;
+  meaningful: boolean;
+  changeId: string | null;
+  snapshotId: string | null;
+  embeddingsSkipped: boolean;
+  message: string;
+}
+
+export async function scanSource(
+  orgId: string,
+  sourceId: string,
+): Promise<ScanResult> {
+  const capture = await captureSnapshot(orgId, sourceId);
+
+  if (capture.kind === "unchanged") {
+    return {
+      changed: false,
+      meaningful: false,
+      changeId: null,
+      snapshotId: capture.snapshotId,
+      embeddingsSkipped: false,
+      message: "No change since last scan.",
+    };
+  }
+
+  const analysis = await analyzeAndStoreChange(orgId, sourceId, capture);
+  const embedded = await embedSnapshot(
+    orgId,
+    capture.meta.competitorId,
+    capture.snapshotId,
+    capture.normalized,
+  );
+  await markScanned(sourceId);
+
+  const embeddingsSkipped = !embedded;
+  const note = embeddingsSkipped ? ` ${EMBEDDINGS_UNAVAILABLE_NOTE}` : "";
+  const base = capture.isFirstSnapshot
+    ? "Baseline captured."
+    : analysis.meaningful
+      ? "Change detected and summarized."
+      : "Snapshot captured; no meaningful change to report.";
+
+  return {
+    changed: true,
+    meaningful: analysis.meaningful,
+    changeId: analysis.changeId,
+    snapshotId: capture.snapshotId,
+    embeddingsSkipped,
+    message: `${base}${note}`,
+  };
 }
