@@ -1,10 +1,13 @@
 import type { Metadata } from "next";
+import { CheckCircle2 } from "lucide-react";
 import { prisma } from "@/lib/db/prisma";
 import { requireOrgContext } from "@/lib/org/context";
 import { listOrgMembers } from "@/lib/org/members";
 import { REVIEW_CONFIDENCE_THRESHOLD } from "@/lib/constants";
 import { canEdit as roleCanEdit } from "@/lib/liveblocks/rooms";
 import { ConfidenceMeter } from "@/components/confidence-meter";
+import { Badge } from "@/components/ui/badge";
+import { EmptyState } from "@/components/ui/empty-state";
 import { initials, relativeTime, displayHost } from "@/lib/format";
 import { ReviewActions } from "@/app/app/_components/review-actions";
 import { AssignControl } from "@/app/app/_components/assign-control";
@@ -83,13 +86,12 @@ export default async function ReviewQueuePage() {
       </header>
 
       {items.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-border bg-secondary/30 p-8 text-center">
-          <h2 className="font-display text-2xl">Queue clear</h2>
-          <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
-            No low-confidence changes are waiting. New uncertain findings will
-            land here for a human to verify.
-          </p>
-        </div>
+        <EmptyState
+          icon={CheckCircle2}
+          title="No uncertain intel waiting"
+          description="Low-confidence findings stop here before reaching the feed — a human verifies them first. Nothing is ever auto-published."
+          hint="0 awaiting review"
+        />
       ) : (
         <ul className="flex flex-col gap-4">
           {items.map((c) => (
@@ -112,9 +114,7 @@ export default async function ReviewQueuePage() {
                     </p>
                   </div>
                 </div>
-                <span className="rounded-full bg-secondary px-2.5 py-0.5 font-meta text-[11px] uppercase tracking-wide text-secondary-foreground">
-                  {c.category}
-                </span>
+                <Badge variant="secondary">{c.category}</Badge>
               </div>
 
               <p className="mt-4 text-[15px] leading-relaxed">{c.summary}</p>

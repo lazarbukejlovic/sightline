@@ -4,6 +4,8 @@ import { useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Callout } from "@/components/ui/callout";
+import { DURATION, EASE_OUT, staggerContainer, staggerItem } from "@/lib/motion";
 
 interface Citation {
   index: number;
@@ -133,25 +135,30 @@ export function AskSightline({ competitorId }: { competitorId?: string }) {
         </Button>
       </div>
 
-      {error && (
-        <p className="rounded-md border border-signal/30 bg-signal/5 px-3 py-2 text-sm text-signal">
-          {error}
-        </p>
-      )}
+      {error && <Callout tone="error">{error}</Callout>}
 
-      {notice && (
-        <p className="rounded-md border border-border bg-secondary/40 px-3 py-2 text-sm text-muted-foreground">
-          {notice}
-        </p>
-      )}
+      {notice && <Callout tone="info">{notice}</Callout>}
 
       {(answer || status === "streaming") && (
         <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="whitespace-pre-wrap rounded-md bg-secondary/40 p-3 text-sm leading-relaxed"
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: DURATION.base, ease: EASE_OUT }}
+          className="max-h-96 overflow-y-auto whitespace-pre-wrap rounded-md bg-secondary/40 p-3 text-sm leading-relaxed [overflow-wrap:anywhere]"
         >
-          {answer || (
+          {answer ? (
+            <>
+              {answer}
+              {status === "streaming" && (
+                <motion.span
+                  aria-hidden
+                  className="ml-0.5 inline-block h-4 w-[2px] translate-y-0.5 bg-signal"
+                  animate={{ opacity: [1, 0.2, 1] }}
+                  transition={{ duration: 1, repeat: Infinity, ease: "easeInOut" }}
+                />
+              )}
+            </>
+          ) : (
             <span className="text-muted-foreground">Retrieving intel…</span>
           )}
         </motion.div>
@@ -162,9 +169,18 @@ export function AskSightline({ competitorId }: { competitorId?: string }) {
           <span className="font-meta text-xs uppercase tracking-wide text-muted-foreground">
             Sources
           </span>
-          <ol className="flex flex-col gap-1">
+          <motion.ol
+            className="flex flex-col gap-1"
+            variants={staggerContainer(0.05)}
+            initial="hidden"
+            animate="show"
+          >
             {citations.map((c) => (
-              <li key={c.index} className="font-meta text-xs">
+              <motion.li
+                key={c.index}
+                variants={staggerItem}
+                className="font-meta text-xs [overflow-wrap:anywhere]"
+              >
                 <span className="text-signal">[{c.index}]</span>{" "}
                 <span className="text-foreground">{c.competitorName}</span>{" "}
                 <span className="text-muted-foreground">· {c.sourceType} · </span>
@@ -172,21 +188,22 @@ export function AskSightline({ competitorId }: { competitorId?: string }) {
                   href={c.sourceUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="text-muted-foreground underline-offset-2 hover:underline"
+                  className="text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
                 >
                   {c.sourceUrl}
                 </a>
-              </li>
+              </motion.li>
             ))}
-          </ol>
+          </motion.ol>
         </div>
       )}
 
       {cost && (
-        <p className="font-meta text-xs text-muted-foreground">
+        <p className="font-meta text-xs tabular-nums text-muted-foreground [overflow-wrap:anywhere]">
           {cost.inputTokens.toLocaleString()} in ·{" "}
-          {cost.outputTokens.toLocaleString()} out · $
-          {cost.costUsd.toFixed(4)} · {cost.model}
+          {cost.outputTokens.toLocaleString()} out ·{" "}
+          <span className="text-foreground">${cost.costUsd.toFixed(4)}</span> ·{" "}
+          {cost.model}
         </p>
       )}
     </div>

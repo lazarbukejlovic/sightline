@@ -1,8 +1,11 @@
 import type { Metadata, Route } from "next";
 import Link from "next/link";
+import { Radar, Link2, Activity } from "lucide-react";
 import { prisma } from "@/lib/db/prisma";
 import { requireOrgContext } from "@/lib/org/context";
 import { ChangeCard, type ChangeCardData } from "@/components/change-card";
+import { EmptyState } from "@/components/ui/empty-state";
+import { cn } from "@/lib/utils";
 import { initials, relativeTime, displayHost } from "@/lib/format";
 import { REVIEW_CONFIDENCE_THRESHOLD } from "@/lib/constants";
 import { AddCompetitorForm } from "./_components/add-competitor-form";
@@ -51,6 +54,7 @@ export default async function WorkspacePage() {
     whyItMatters: ch.whyItMatters,
     source: displayHost(ch.source.url),
     detectedAt: relativeTime(ch.detectedAt),
+    diff: ch.diffExcerpt,
   }));
 
   const totalCost = Number(cost._sum.costUsd ?? 0);
@@ -78,16 +82,32 @@ export default async function WorkspacePage() {
               <li key={c.id}>
                 <Link
                   href={`/app/competitors/${c.id}` as Route}
-                  className="flex items-center justify-between rounded-lg border border-border bg-card px-3 py-2 transition-colors hover:bg-secondary/60"
+                  className="group flex items-center justify-between gap-2 rounded-lg border border-border bg-card px-3 py-2 transition-colors hover:border-ink/20 hover:bg-secondary/60"
                 >
-                  <span className="flex items-center gap-2.5">
-                    <span className="flex size-7 items-center justify-center rounded-md bg-secondary font-meta text-[11px] font-semibold">
+                  <span className="flex min-w-0 items-center gap-2.5">
+                    <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-secondary font-meta text-[11px] font-semibold">
                       {initials(c.name)}
                     </span>
-                    <span className="font-medium">{c.name}</span>
+                    <span className="truncate font-medium">{c.name}</span>
                   </span>
-                  <span className="font-meta text-xs text-muted-foreground">
-                    {c._count.sources}s · {c._count.changes}c
+                  <span className="flex shrink-0 items-center gap-2 font-meta text-[11px] tabular-nums text-muted-foreground">
+                    <span
+                      className="flex items-center gap-1"
+                      title={`${c._count.sources} source${c._count.sources === 1 ? "" : "s"}`}
+                    >
+                      <Link2 className="size-3" strokeWidth={1.75} />
+                      {c._count.sources}
+                    </span>
+                    <span
+                      className={cn(
+                        "flex items-center gap-1",
+                        c._count.changes > 0 && "text-signal",
+                      )}
+                      title={`${c._count.changes} change${c._count.changes === 1 ? "" : "s"} detected`}
+                    >
+                      <Activity className="size-3" strokeWidth={1.75} />
+                      {c._count.changes}
+                    </span>
                   </span>
                 </Link>
               </li>
@@ -112,20 +132,20 @@ export default async function WorkspacePage() {
               What changed
             </h1>
           </div>
-          <span className="font-meta text-xs text-muted-foreground">
-            {changes.length} recent · ${totalCost.toFixed(4)} AI spend
-          </span>
+          <div className="flex items-center gap-2 font-meta text-xs tabular-nums text-muted-foreground">
+            <span>{changes.length} recent</span>
+            <span className="text-border">·</span>
+            <span title="Total AI spend for this org">${totalCost.toFixed(4)} spent</span>
+          </div>
         </div>
 
         {feed.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-border bg-secondary/30 p-8 text-center">
-            <h2 className="font-display text-2xl">Your Intel Feed is empty</h2>
-            <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
-              Add a competitor, point Sightline at a public page (pricing,
-              changelog, blog, news, careers), and run a scan. Detected changes
-              appear here with a citation and confidence score.
-            </p>
-          </div>
+          <EmptyState
+            icon={Radar}
+            title="No signal yet"
+            description="Add a competitor, point Sightline at a public page — pricing, changelog, blog, news, careers — and run a scan. Meaningful changes land here with cited evidence, an impact rating, and a confidence score."
+            hint="Awaiting first scan"
+          />
         ) : (
           <div className="flex flex-col gap-4">
             {feed.map((data, i) => (

@@ -5,6 +5,7 @@ import { useFormStatus } from "react-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Callout } from "@/components/ui/callout";
 import type { AuthState } from "@/app/(auth)/actions";
 
 type AuthAction = (state: AuthState, formData: FormData) => Promise<AuthState>;
@@ -68,22 +69,8 @@ export function AuthForm({
         />
       </div>
 
-      {state.error && (
-        <p
-          role="alert"
-          className="rounded-md border border-signal/30 bg-signal/5 px-3 py-2 text-sm text-signal"
-        >
-          {state.error}
-        </p>
-      )}
-      {state.message && (
-        <p
-          role="status"
-          className="rounded-md border border-teal/30 bg-teal/5 px-3 py-2 text-sm text-teal"
-        >
-          {state.message}
-        </p>
-      )}
+      {state.error && <Callout tone="error">{state.error}</Callout>}
+      {state.message && <Callout tone="success">{state.message}</Callout>}
 
       <SubmitButton label={isSignUp ? "Create account" : "Sign in"} />
     </form>

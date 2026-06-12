@@ -21,7 +21,7 @@ const SOURCE_TYPES = [
 function Submit() {
   const { pending } = useFormStatus();
   return (
-    <Button type="submit" size="sm" disabled={pending}>
+    <Button type="submit" size="sm" className="w-full" disabled={pending}>
       {pending ? "Adding…" : "Add source"}
     </Button>
   );
@@ -34,12 +34,9 @@ export function AddSourceForm({ competitorId }: { competitorId: string }) {
   );
 
   return (
-    <form
-      action={formAction}
-      className="flex flex-col gap-3 sm:flex-row sm:items-end"
-    >
+    <form action={formAction} className="flex flex-col gap-3">
       <input type="hidden" name="competitorId" value={competitorId} />
-      <div className="flex flex-col gap-1.5 sm:w-40">
+      <div className="flex flex-col gap-1.5">
         <Label htmlFor="source-type">Type</Label>
         <select
           id="source-type"
@@ -68,9 +65,7 @@ export function AddSourceForm({ competitorId }: { competitorId: string }) {
         />
       </div>
       <Submit />
-      <div className="sm:w-full sm:basis-full">
-        <FormFeedback state={state} />
-      </div>
+      <FormFeedback state={state} />
     </form>
   );
 }

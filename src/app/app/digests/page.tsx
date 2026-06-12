@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
+import { Newspaper } from "lucide-react";
 import { prisma } from "@/lib/db/prisma";
 import { requireOrgContext } from "@/lib/org/context";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Markdown } from "@/components/markdown";
 import { formatRange } from "@/lib/digest-range";
 
 export const metadata: Metadata = { title: "Digests · Sightline" };
@@ -18,9 +21,7 @@ export default async function DigestsPage() {
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-6">
       <header>
-        <p className="font-meta text-xs uppercase tracking-wider text-signal">
-          Weekly digest
-        </p>
+        <p className="rule-eyebrow text-[10px] text-signal">Executive briefing</p>
         <h1 className="mt-1 font-display text-3xl tracking-tight">
           Your briefings
         </h1>
@@ -31,35 +32,44 @@ export default async function DigestsPage() {
       </header>
 
       {digests.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-border bg-secondary/30 p-8 text-center">
-          <h2 className="font-display text-2xl">No digests yet</h2>
-          <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
-            The first weekly digest is generated on the next Monday run. You can
-            also trigger <span className="font-meta">weekly-digest</span> from
-            the Inngest dev dashboard to preview one now.
-          </p>
-        </div>
+        <EmptyState
+          icon={Newspaper}
+          title="No briefings filed yet"
+          description={
+            <>
+              Each Monday, Sightline files a one-page briefing of the week&apos;s
+              competitor moves — grounded strictly in detected changes. Trigger{" "}
+              <span className="font-meta">weekly-digest</span> from the Inngest
+              dashboard to preview one now.
+            </>
+          }
+          hint="Next briefing · Mon 09:00 UTC"
+        />
       ) : (
-        <ul className="flex flex-col gap-4">
+        <ul className="flex flex-col gap-5">
           {digests.map((d) => (
             <li
               key={d.id}
-              className="rounded-xl border border-border bg-card p-5 shadow-sm"
+              className="overflow-hidden rounded-xl border border-border bg-card shadow-sm"
             >
-              <div className="flex items-baseline justify-between gap-3">
-                <h2 className="font-display text-xl">
-                  {formatRange({
-                    periodStart: d.periodStart,
-                    periodEnd: d.periodEnd,
-                  })}
-                </h2>
-                <span className="font-meta text-xs text-muted-foreground">
+              <div aria-hidden className="h-0.5 w-full bg-signal/70" />
+              <div className="flex items-center justify-between gap-3 border-b border-border bg-secondary/30 px-5 py-3">
+                <div className="min-w-0">
+                  <p className="rule-eyebrow text-[9px] text-muted-foreground">
+                    Weekly briefing
+                  </p>
+                  <h2 className="font-display text-xl tracking-tight">
+                    {formatRange({
+                      periodStart: d.periodStart,
+                      periodEnd: d.periodEnd,
+                    })}
+                  </h2>
+                </div>
+                <span className="shrink-0 rounded-full border border-border bg-card px-2.5 py-0.5 font-meta text-[11px] tabular-nums text-muted-foreground">
                   {d.changeCount} change{d.changeCount === 1 ? "" : "s"}
                 </span>
               </div>
-              <div className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-foreground">
-                {d.summary}
-              </div>
+              <Markdown content={d.summary} className="p-5" />
             </li>
           ))}
         </ul>

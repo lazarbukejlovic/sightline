@@ -8,6 +8,7 @@ import { SiteFooter } from "@/components/landing/site-footer";
 export default function LandingPage() {
   return (
     <div className="min-h-dvh bg-background">
+      <div aria-hidden className="h-0.5 w-full bg-signal" />
       <SiteHeader />
       <main>
         <Hero />

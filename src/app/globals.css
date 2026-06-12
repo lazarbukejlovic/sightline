@@ -20,6 +20,14 @@
   --signal: #e5484d; /* change detected / high impact */
   --signal-ink: #fbeceb;
   --teal: #137a6e; /* reviewed / on-track */
+  --amber: #b7791f; /* in-progress / connecting (AA on paper) */
+
+  /* Motion tokens — shared by CSS transitions and Framer Motion (src/lib/motion.ts) */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1); /* settle */
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --duration-fast: 180ms;
+  --duration-base: 320ms;
+  --duration-slow: 600ms;
 
   /* shadcn semantic tokens (light = hero) */
   --background: var(--paper);
@@ -89,6 +97,7 @@
   --color-signal: var(--signal);
   --color-signal-ink: var(--signal-ink);
   --color-teal: var(--teal);
+  --color-amber: var(--amber);
   --color-paper: var(--paper);
   --color-ink: var(--ink);
 
@@ -107,6 +116,10 @@
   * {
     border-color: var(--color-border);
   }
+  html {
+    -webkit-tap-highlight-color: transparent;
+    scroll-behavior: smooth;
+  }
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
@@ -116,6 +129,30 @@
   }
   ::selection {
     background-color: color-mix(in srgb, var(--signal) 22%, transparent);
+  }
+  /* Consistent, on-brand focus ring for everything keyboard-reachable. */
+  :focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--ring) 70%, transparent);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+  /* Thin, paper-toned scrollbars (intelligence-tool feel, not chrome). */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--ink) 18%, transparent) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background-color: color-mix(in srgb, var(--ink) 16%, transparent);
+    border-radius: 9999px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: color-mix(in srgb, var(--ink) 28%, transparent);
   }
 }
 
@@ -128,5 +165,122 @@
   .font-meta {
     font-family: var(--font-mono);
     font-feature-settings: "tnum" 1;
+  }
+  /* Skeleton shimmer for loading states (never spinners). */
+  .skeleton {
+    position: relative;
+    overflow: hidden;
+    background-color: color-mix(in srgb, var(--ink) 7%, transparent);
+    border-radius: var(--radius-md);
+  }
+  .skeleton::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(
+      90deg,
+      transparent,
+      color-mix(in srgb, var(--card) 70%, transparent),
+      transparent
+    );
+    animation: sl-shimmer 1.4s ease-in-out infinite;
+  }
+}
+
+@keyframes sl-shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* Restrained "breathing" pulse for the live presence dot (the only endless
+   motion on the page). Neutralized by the reduced-motion block below. */
+@keyframes sl-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.45);
+    opacity: 0.55;
+  }
+}
+
+@utility animate-breathe {
+  animation: sl-breathe 2.6s var(--ease-in-out) infinite;
+}
+
+@utility text-balance {
+  text-wrap: balance;
+}
+
+/* ── Identity textures ───────────────────────────────────────────────
+   A faint warm "dossier" grid + paper vignette give every surface the
+   intelligence-command-desk feel. Apply to an absolutely-positioned,
+   aria-hidden backdrop so content stays crisp above it. */
+@utility dossier-grid {
+  background-image:
+    linear-gradient(
+      to right,
+      color-mix(in srgb, var(--ink) 4%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--ink) 4%, transparent) 1px,
+      transparent 1px
+    );
+  background-size: 26px 26px;
+}
+
+@utility dossier-rule {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent 27px,
+    color-mix(in srgb, var(--ink) 5%, transparent) 27px,
+    color-mix(in srgb, var(--ink) 5%, transparent) 28px
+  );
+}
+
+@utility paper-vignette {
+  background:
+    radial-gradient(
+      62% 48% at 18% 0%,
+      color-mix(in srgb, var(--signal) 5%, transparent),
+      transparent 64%
+    ),
+    radial-gradient(
+      52% 42% at 92% 8%,
+      color-mix(in srgb, var(--teal) 5%, transparent),
+      transparent 62%
+    );
+}
+
+/* Hairline divider with a centered tick — section rules in the command desk. */
+@utility rule-eyebrow {
+  font-family: var(--font-mono);
+  font-feature-settings: "tnum" 1;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+}
+
+/* Honor reduced-motion globally as a safety net (Framer also respects it via
+   MotionConfig reducedMotion="user"). */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+  .skeleton::after {
+    animation: none;
   }
 }

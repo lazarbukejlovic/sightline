@@ -43,7 +43,7 @@ export function AssignControl({
         name="assigneeId"
         defaultValue={currentAssigneeId ?? ""}
         className={cn(
-          "h-9 rounded-md border border-input bg-card px-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          "h-9 rounded-md border border-input bg-card px-2 font-meta text-xs shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         )}
         aria-label="Assign to teammate"
       >
