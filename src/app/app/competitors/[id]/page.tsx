@@ -37,7 +37,7 @@ export default async function CompetitorPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const { orgId } = await requireOrgContext();
+  const { user, orgId } = await requireOrgContext();
 
   const competitor = await prisma.competitor.findFirst({
     where: { id, orgId },
@@ -81,6 +81,14 @@ export default async function CompetitorPage({
     return !acc || s.lastScannedAt > acc ? s.lastScannedAt : acc;
   }, null);
 
+  const myFeedback = await prisma.aiFeedback.findMany({
+    where: { orgId, userId: user.id, changeId: { in: changes.map((c) => c.id) } },
+    select: { changeId: true, rating: true },
+  });
+  const ratingByChange = new Map(
+    myFeedback.map((f) => [f.changeId, f.rating] as const),
+  );
+
   const feed: ChangeCardData[] = changes.map((ch) => ({
     competitor: competitor.name,
     initials: initials(competitor.name),
@@ -92,6 +100,8 @@ export default async function CompetitorPage({
     source: displayHost(ch.source.url),
     detectedAt: relativeTime(ch.detectedAt),
     diff: ch.diffExcerpt,
+    feedbackChangeId: ch.id,
+    feedbackRating: ratingByChange.get(ch.id) ?? null,
   }));
 
   return (

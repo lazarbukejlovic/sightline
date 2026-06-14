@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Callout } from "@/components/ui/callout";
+import { FeedbackButtons } from "@/app/app/_components/feedback-buttons";
 import { DURATION, EASE_OUT, staggerContainer, staggerItem } from "@/lib/motion";
 
 interface Citation {
@@ -26,6 +27,7 @@ export function AskSightline({ competitorId }: { competitorId?: string }) {
   const [answer, setAnswer] = useState("");
   const [citations, setCitations] = useState<Citation[]>([]);
   const [cost, setCost] = useState<CostInfo | null>(null);
+  const [runId, setRunId] = useState<string | null>(null);
   const [status, setStatus] = useState<"idle" | "streaming" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -39,6 +41,7 @@ export function AskSightline({ competitorId }: { competitorId?: string }) {
     setAnswer("");
     setCitations([]);
     setCost(null);
+    setRunId(null);
     setError(null);
     setNotice(null);
 
@@ -86,14 +89,16 @@ export function AskSightline({ competitorId }: { competitorId?: string }) {
           const event = JSON.parse(line) as
             | { type: "sources"; citations: Citation[] }
             | { type: "text"; text: string }
-            | { type: "done"; cost: CostInfo }
+            | { type: "done"; cost: CostInfo; runId: string | null }
             | { type: "error"; error: string };
 
           if (event.type === "sources") setCitations(event.citations);
           else if (event.type === "text")
             setAnswer((prev) => prev + event.text);
-          else if (event.type === "done") setCost(event.cost);
-          else if (event.type === "error") throw new Error(event.error);
+          else if (event.type === "done") {
+            setCost(event.cost);
+            setRunId(event.runId);
+          } else if (event.type === "error") throw new Error(event.error);
         }
       }
       setStatus("idle");
@@ -205,6 +210,12 @@ export function AskSightline({ competitorId }: { competitorId?: string }) {
           <span className="text-foreground">${cost.costUsd.toFixed(4)}</span> ·{" "}
           {cost.model}
         </p>
+      )}
+
+      {runId && status === "idle" && (
+        <div className="border-t border-border pt-3">
+          <FeedbackButtons aiRunId={runId} />
+        </div>
       )}
     </div>
   );

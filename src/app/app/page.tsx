@@ -10,12 +10,13 @@ import { initials, relativeTime, displayHost } from "@/lib/format";
 import { REVIEW_CONFIDENCE_THRESHOLD } from "@/lib/constants";
 import { AddCompetitorForm } from "./_components/add-competitor-form";
 import { AskSightline } from "./_components/ask-sightline";
+import { LoadSampleIntel } from "./_components/load-sample-intel";
 
 export const metadata: Metadata = { title: "Intel Feed · Sightline" };
 export const dynamic = "force-dynamic";
 
 export default async function WorkspacePage() {
-  const { orgId } = await requireOrgContext();
+  const { user, orgId } = await requireOrgContext();
 
   const [competitors, changes, cost] = await Promise.all([
     prisma.competitor.findMany({
@@ -44,6 +45,19 @@ export default async function WorkspacePage() {
     prisma.aiRun.aggregate({ where: { orgId }, _sum: { costUsd: true } }),
   ]);
 
+  // The current user's feedback on the shown changes (to pre-fill thumbs).
+  const myFeedback = await prisma.aiFeedback.findMany({
+    where: {
+      orgId,
+      userId: user.id,
+      changeId: { in: changes.map((c) => c.id) },
+    },
+    select: { changeId: true, rating: true },
+  });
+  const ratingByChange = new Map(
+    myFeedback.map((f) => [f.changeId, f.rating] as const),
+  );
+
   const feed: ChangeCardData[] = changes.map((ch) => ({
     competitor: ch.competitor.name,
     initials: initials(ch.competitor.name),
@@ -55,6 +69,8 @@ export default async function WorkspacePage() {
     source: displayHost(ch.source.url),
     detectedAt: relativeTime(ch.detectedAt),
     diff: ch.diffExcerpt,
+    feedbackChangeId: ch.id,
+    feedbackRating: ratingByChange.get(ch.id) ?? null,
   }));
 
   const totalCost = Number(cost._sum.costUsd ?? 0);
@@ -143,9 +159,11 @@ export default async function WorkspacePage() {
           <EmptyState
             icon={Radar}
             title="No signal yet"
-            description="Add a competitor, point Sightline at a public page — pricing, changelog, blog, news, careers — and run a scan. Meaningful changes land here with cited evidence, an impact rating, and a confidence score."
+            description="Add a competitor, point Sightline at a public page — pricing, changelog, blog, news, careers — and run a scan. Meaningful changes land here with cited evidence, an impact rating, and a confidence score. New here? Load sample intel to see it in action."
             hint="Awaiting first scan"
-          />
+          >
+            <LoadSampleIntel />
+          </EmptyState>
         ) : (
           <div className="flex flex-col gap-4">
             {feed.map((data, i) => (

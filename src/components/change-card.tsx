@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { ConfidenceMeter } from "@/components/confidence-meter";
 import { RedlineDiff, countDiff } from "@/components/redline-diff";
 import { Badge } from "@/components/ui/badge";
+import { FeedbackButtons } from "@/app/app/_components/feedback-buttons";
 import { cn } from "@/lib/utils";
 import { DURATION, EASE_OUT } from "@/lib/motion";
 
@@ -28,6 +29,10 @@ export interface ChangeCardData {
   detectedAt: string;
   /** Optional redline evidence (existing diffExcerpt data). */
   diff?: string | null;
+  /** When set, render the AI feedback control bound to this change. */
+  feedbackChangeId?: string;
+  /** The current user's existing vote, if any. */
+  feedbackRating?: "up" | "down" | null;
 }
 
 const categoryLabel: Record<ChangeCategory, string> = {
@@ -149,6 +154,15 @@ export function ChangeCard({
           </motion.div>
         )}
       </AnimatePresence>
+
+      {data.feedbackChangeId && (
+        <div className="mt-4 border-t border-border pt-3">
+          <FeedbackButtons
+            changeId={data.feedbackChangeId}
+            initialRating={data.feedbackRating ?? null}
+          />
+        </div>
+      )}
     </motion.article>
   );
 }

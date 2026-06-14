@@ -352,3 +352,54 @@ model BattlecardSuggestion {
   @@index([orgId, battlecardId, status])
   @@map("battlecard_suggestions")
 }
+
+// ─────────────────────────────────────────────────────────────
+// Phase 4 — business (billing) + eval/feedback
+// ─────────────────────────────────────────────────────────────
+
+enum Plan {
+  free
+  pro
+  team
+}
+
+enum FeedbackRating {
+  up
+  down
+}
+
+/// One billing record per org, synced from Stripe via webhooks. Prisma writes
+/// it server-side (RLS-bypassing); the app reads it to gate features by plan.
+model Subscription {
+  id                   String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orgId                String    @unique @map("org_id") @db.Uuid
+  plan                 Plan      @default(free)
+  status               String    @default("none")
+  seats                Int       @default(1)
+  stripeCustomerId     String?   @unique @map("stripe_customer_id")
+  stripeSubscriptionId String?   @unique @map("stripe_subscription_id")
+  currentPeriodEnd     DateTime? @map("current_period_end") @db.Timestamptz(6)
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("subscriptions")
+}
+
+/// Human feedback on AI output (eval loop): thumbs + optional correction, on an
+/// Ask answer (ai_run) or a change summary (change). One vote per user/target.
+model AiFeedback {
+  id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orgId           String         @map("org_id") @db.Uuid
+  userId          String         @map("user_id") @db.Uuid
+  rating          FeedbackRating
+  correctedOutput String?        @map("corrected_output")
+  aiRunId         String?        @map("ai_run_id") @db.Uuid
+  changeId        String?        @map("change_id") @db.Uuid
+  createdAt       DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([changeId, userId])
+  @@unique([aiRunId, userId])
+  @@index([orgId, createdAt(sort: Desc)])
+  @@map("ai_feedback")
+}

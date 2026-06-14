@@ -11,6 +11,7 @@ import {
 import { retrieveChunks, buildAskPrompt } from "@/lib/ai/ask";
 import { logAiRun } from "@/lib/ai/runs";
 import { computeCostUsd } from "@/lib/ai/pricing";
+import { reportAiUsage } from "@/lib/billing/subscription";
 
 const UNAVAILABLE_MESSAGE =
   "Ask Sightline is unavailable until embeddings are enabled. Your scans and snapshots are still saved.";
@@ -106,7 +107,7 @@ export async function POST(request: NextRequest) {
         const outputTokens = usage?.outputTokens ?? 0;
         const costUsd = computeCostUsd(model, inputTokens, outputTokens);
 
-        await logAiRun({
+        const run = await logAiRun({
           orgId,
           type: "ask",
           model,
@@ -118,8 +119,13 @@ export async function POST(request: NextRequest) {
           metadata: { sources: citations.length, competitorId },
         });
 
+        // Report one unit of metered AI usage to Stripe (best-effort, no-op
+        // unless billing is configured and the org has a customer).
+        await reportAiUsage(orgId);
+
         send({
           type: "done",
+          runId: run.id,
           cost: { inputTokens, outputTokens, costUsd, model },
         });
       } catch (err) {

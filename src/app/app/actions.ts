@@ -9,6 +9,9 @@ import { requireOrgContext } from "@/lib/org/context";
 import { assertAtLeast } from "@/lib/org-scope";
 import { scanSource as runScan } from "@/lib/scan";
 import { ensureBattlecard } from "@/lib/battlecard";
+import { getOrgPlan } from "@/lib/billing/subscription";
+import { canAddCompetitor, planAllows, competitorLimit } from "@/lib/billing/plans";
+import { seedDemoData } from "@/lib/demo-seed";
 
 export interface ActionState {
   error?: string;
@@ -42,6 +45,18 @@ export async function createCompetitor(
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+
+  // Plan gate: Free orgs may track a limited number of competitors.
+  const [plan, count] = await Promise.all([
+    getOrgPlan(orgId),
+    prisma.competitor.count({ where: { orgId } }),
+  ]);
+  if (!canAddCompetitor(plan, count)) {
+    const limit = competitorLimit(plan);
+    return {
+      error: `Your plan tracks up to ${limit} competitor${limit === 1 ? "" : "s"}. Upgrade in Billing to add more.`,
+    };
   }
 
   await prisma.competitor.create({
@@ -201,6 +216,14 @@ export async function openBattlecard(formData: FormData): Promise<void> {
     select: { id: true, name: true },
   });
   if (!competitor) redirect("/app");
+
+  // Plan gate: collaborative battlecards are a paid feature.
+  const plan = await getOrgPlan(orgId);
+  if (!planAllows(plan, "battlecards")) {
+    redirect(
+      `/app/billing?upgrade=battlecards` as Route,
+    );
+  }
 
   const existing = await prisma.battlecard.findUnique({
     where: { orgId_competitorId: { orgId, competitorId: competitor.id } },
@@ -379,4 +402,102 @@ export async function resolveSuggestion(
     message:
       parsed.data.decision === "approved" ? "Approved." : "Rejected.",
   };
+}
+
+// ─────────────────────────────────────────────────────────────
+// Phase 4 — eval / feedback loop
+// ─────────────────────────────────────────────────────────────
+
+const feedbackSchema = z.object({
+  rating: z.enum(["up", "down"]),
+  correctedOutput: z.string().trim().max(4000).optional(),
+  aiRunId: z.string().uuid().optional(),
+  changeId: z.string().uuid().optional(),
+});
+
+/**
+ * Record human feedback on AI output — a thumbs up/down (and optional
+ * correction) on an Ask answer (aiRunId) or a change summary (changeId).
+ * One vote per user per target; voting again updates it.
+ */
+export async function submitFeedback(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const { user, orgId, role } = await requireOrgContext();
+  try {
+    assertAtLeast(role, "member");
+  } catch {
+    return { error: "Viewers can't submit feedback." };
+  }
+
+  const parsed = feedbackSchema.safeParse({
+    rating: formData.get("rating"),
+    correctedOutput: formData.get("correctedOutput") ?? undefined,
+    aiRunId: formData.get("aiRunId") ?? undefined,
+    changeId: formData.get("changeId") ?? undefined,
+  });
+  if (!parsed.success) return { error: "Invalid feedback." };
+
+  const { rating, correctedOutput, aiRunId, changeId } = parsed.data;
+  if (!aiRunId && !changeId) return { error: "Nothing to rate." };
+  const corrected = correctedOutput && correctedOutput.length > 0 ? correctedOutput : null;
+
+  // Verify the target belongs to this org before recording feedback.
+  if (changeId) {
+    const c = await prisma.change.findFirst({
+      where: { id: changeId, orgId },
+      select: { id: true },
+    });
+    if (!c) return { error: "Change not found in this organization." };
+    await prisma.aiFeedback.upsert({
+      where: { changeId_userId: { changeId, userId: user.id } },
+      create: { orgId, userId: user.id, rating, correctedOutput: corrected, changeId },
+      update: { rating, correctedOutput: corrected },
+    });
+  } else if (aiRunId) {
+    const r = await prisma.aiRun.findFirst({
+      where: { id: aiRunId, orgId },
+      select: { id: true },
+    });
+    if (!r) return { error: "AI run not found in this organization." };
+    await prisma.aiFeedback.upsert({
+      where: { aiRunId_userId: { aiRunId, userId: user.id } },
+      create: { orgId, userId: user.id, rating, correctedOutput: corrected, aiRunId },
+      update: { rating, correctedOutput: corrected },
+    });
+  }
+
+  revalidatePath("/app");
+  revalidatePath("/app/review");
+  return { message: "Thanks — feedback recorded." };
+}
+
+// ─────────────────────────────────────────────────────────────
+// Phase 4 — onboarding (load sample intel)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * First-run convenience: populate an empty workspace with the demo dataset
+ * (real public companies + realistic detected changes, incl. a low-confidence
+ * item that lands in the Review Queue) so a new user sees value immediately.
+ * Only runs when the org has no competitors yet.
+ */
+export async function loadSampleIntel(): Promise<ActionState> {
+  const { orgId, role } = await requireOrgContext();
+  try {
+    assertAtLeast(role, "member");
+  } catch {
+    return { error: "You don't have permission to do that." };
+  }
+
+  const count = await prisma.competitor.count({ where: { orgId } });
+  if (count > 0) {
+    return { error: "Your workspace already has competitors." };
+  }
+
+  await seedDemoData(prisma, orgId);
+  revalidatePath("/app");
+  revalidatePath("/app/review");
+  return { message: "Sample intel loaded — explore the feed." };
 }

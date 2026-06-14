@@ -64,6 +64,7 @@ export default async function AppLayout({
                 )}
               </NavLink>
               <NavLink href="/app/digests">Digests</NavLink>
+              <NavLink href="/app/billing">Billing</NavLink>
             </nav>
           </div>
 

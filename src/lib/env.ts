@@ -38,6 +38,16 @@ const serverSchema = z.object({
   // required at runtime to open battlecard rooms (the editor degrades to a
   // clean "collaboration unavailable" notice when unset).
   LIVEBLOCKS_SECRET_KEY: z.string().min(1).optional(),
+  // Phase 4 — billing (Stripe, TEST MODE). All OPTIONAL: billing degrades to a
+  // clean "billing unavailable" notice when unset, and every feature gate
+  // treats an unconfigured Stripe as "free plan". Never use live keys here.
+  STRIPE_SECRET_KEY: z.string().min(1).optional(),
+  STRIPE_WEBHOOK_SECRET: z.string().min(1).optional(),
+  STRIPE_PRO_PRICE_ID: z.string().min(1).optional(),
+  STRIPE_TEAM_PRICE_ID: z.string().min(1).optional(),
+  STRIPE_AI_USAGE_PRICE_ID: z.string().min(1).optional(),
+  // The meter event name behind STRIPE_AI_USAGE_PRICE_ID's billing meter.
+  STRIPE_AI_USAGE_METER_EVENT: z.string().min(1).default("ai_answer"),
 });
 
 export type ClientEnv = z.infer<typeof clientSchema>;

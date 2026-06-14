@@ -9,6 +9,7 @@ import {
 import { isDueForScan } from "@/lib/scan-schedule";
 import { generateOrgDigest } from "@/lib/digest";
 import { weeklyRange } from "@/lib/digest-range";
+import { paidOrgIds } from "@/lib/billing/subscription";
 
 const SCAN_EVENT = "source/scan.requested";
 
@@ -26,19 +27,22 @@ export const scheduledScan = inngest.createFunction(
   },
   async ({ step }) => {
     const due = await step.run("select-due-sources", async () => {
-      const sources = await prisma.source.findMany({
-        where: { isActive: true, NOT: { scanFrequency: "manual" } },
-        select: {
-          id: true,
-          orgId: true,
-          scanFrequency: true,
-          isActive: true,
-          lastScannedAt: true,
-        },
-      });
+      const [sources, paid] = await Promise.all([
+        prisma.source.findMany({
+          where: { isActive: true, NOT: { scanFrequency: "manual" } },
+          select: {
+            id: true,
+            orgId: true,
+            scanFrequency: true,
+            isActive: true,
+            lastScannedAt: true,
+          },
+        }),
+        paidOrgIds(), // scheduled monitoring is a paid feature
+      ]);
       const now = new Date();
       return sources
-        .filter((s) => isDueForScan(s, now))
+        .filter((s) => paid.has(s.orgId) && isDueForScan(s, now))
         .map((s): ScanRequestedData => ({ orgId: s.orgId, sourceId: s.id }));
     });
 
@@ -118,9 +122,13 @@ export const weeklyDigest = inngest.createFunction(
     triggers: [{ cron: "0 9 * * 1" }],
   },
   async ({ step }) => {
-    const orgs = await step.run("list-orgs", () =>
-      prisma.organization.findMany({ select: { id: true } }),
-    );
+    const orgs = await step.run("list-orgs", async () => {
+      const [all, paid] = await Promise.all([
+        prisma.organization.findMany({ select: { id: true } }),
+        paidOrgIds(), // weekly digest is a paid feature
+      ]);
+      return all.filter((o) => paid.has(o.id));
+    });
 
     const range = weeklyRange(new Date());
 

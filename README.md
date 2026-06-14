@@ -1,188 +1,188 @@
 # Sightline
 
-> AI competitive-intelligence for B2B go-to-market teams. Sightline watches
-> competitors' public footprint, detects what _meaningfully_ changed, explains
-> _why it matters_ with cited evidence and a confidence score, and turns intel
-> into live, collaborative battlecards.
+**AI competitive-intelligence for B2B go-to-market teams.** Sightline watches
+your competitors' public footprint, detects what _meaningfully_ changed,
+explains _why it matters_ with cited evidence and a confidence score, and turns
+it into live, collaborative battlecards your whole team shares.
 
-This repository is being built **phase by phase**. See
-[`SIGHTLINE_PLAN.md`](./SIGHTLINE_PLAN.md) for strategy and
-[`SIGHTLINE_BUILD_PROMPT.md`](./SIGHTLINE_BUILD_PROMPT.md) for the build brief.
+> **Live demo:** _add your Vercel URL here_ · **Walkthrough:** _add your Loom link here_
 
----
-
-## Status — Phase 3: Real-time collaboration ✅
-
-Phases 0–2 plus Phase 3 (collaborative battlecards, comments, assignments,
-role enforcement, suggest→approve) are complete.
-
-**Phase 3 — Real-time collaboration**
-
-- **Collaborative battlecards** per competitor on **Liveblocks + Yjs**: a
-  CodeMirror editor with conflict-free concurrent editing, **live cursors**,
-  and a **presence avatar stack**. Rooms are org-namespaced
-  (`org:{orgId}:battlecard:{id}`) and the auth endpoint only ever grants the
-  caller access to their **own org's** room pattern — tenant-isolated.
-- **Comments** on changes (Review Queue) and on battlecards.
-- **Assignment**: a change can be assigned to a teammate.
-- **Role enforcement, server-side**: Owner/Admin/Member can edit; **Viewer is
-  read-only** — enforced in the Liveblocks token (READ vs FULL access), in
-  every server action (`assertAtLeast("member")`), and in the editor
-  (`EditorState.readOnly`).
-- **battlecard.suggest**: a high-impact change drafts a **pending** battlecard
-  edit; a human **approves** (which inserts it into the editor) or **rejects** —
-  never auto-applied.
-
-> Not yet built: Stripe billing, AI cost dashboard UI, evals-in-CI, self-hosted
-> Yjs (Hocuspocus).
+![hero screenshot placeholder](docs/hero.png)
 
 ---
 
-Phase 0 (foundation) + Phase 1 (core loop) + Phase 2 (scheduled monitoring,
-review queue, weekly digest, tracing) are complete.
+## What it is
 
-**Phase 2 — Agentic + scheduled**
+An always-on "intelligence command desk" for product and GTM teams. Add a
+competitor, point Sightline at their public pages (pricing, changelog, blog,
+news, careers), and it:
 
-- **Inngest** scheduled monitoring: an hourly cron fans out a durable scan job
-  per **due** source (respecting its `scan_frequency` + a hard **12h floor**).
-  Manual "Scan now" still works. Scan stages are separate `step.run`s so a
-  retry can't double-charge the AI APIs; an **unchanged content hash skips the
-  analyze/embed steps entirely** (no change = no spend).
-- **Review Queue**: changes with confidence `< 0.6` stay out of the feed and
-  surface at `/app/review` for a human to **mark reviewed** or **dismiss**.
-  AI is decision-support, never auto-authoritative.
-- **Weekly digest** (Inngest cron, Mondays 09:00 UTC): per-org summary of the
-  week's changes → `digests`, shown at `/app/digests`.
-- **Langfuse** tracing on every AI call (traces, cost, latency), alongside the
-  existing `ai_runs` logging; the Ask cost line is in the UI. Optional —
-  no-ops when unconfigured.
+1. **Monitors** each source on a schedule (durable background jobs), snapshots
+   the normalized text, and diffs it against the last snapshot.
+2. **Explains** meaningful changes with an LLM — a summary, category, impact,
+   a one-line _why it matters_, and a **confidence score**, every claim tied to
+   a **redline of the exact diff**.
+3. **Routes uncertainty to humans** — low-confidence findings land in a Review
+   Queue before they ever reach the feed. AI is decision-support, never the
+   final authority.
+4. **Answers questions** over everything collected — _"How did Notion change
+   pricing this quarter?"_ — with inline citations and the token cost shown.
+5. **Shares** intel as real-time collaborative **battlecards** (presence, live
+   cursors, comments), with AI-drafted edits a human approves.
 
-> Not yet built (later phases): Liveblocks/Yjs battlecards, Stripe billing,
-> the AI cost dashboard UI, evals-in-CI.
+## The problem
+
+GTM teams lose deals to competitor moves they find out about too late — a
+pricing change, a new integration, a positioning shift. The signal is public,
+but nobody has time to watch every page. Generic LLM chat can't help: it has no
+memory of what changed, no evidence, no confidence, and no shared workspace.
+
+## Architecture
+
+```
+                            ┌──────────────────────────────────────────┐
+   Browser (Next 15 RSC) ──▶│ Server Actions / Route Handlers           │
+   • Intel Feed             │  • org_id resolved + verified per request │
+   • Battlecard editor      │  • app-layer tenancy scope (every query)  │
+   • Ask Sightline (stream) └───────────────┬──────────────────────────┘
+        │  Liveblocks (Yjs)                  │ Prisma (privileged)
+        ▼                                    ▼
+   ┌───────────┐                  ┌────────────────────────────┐
+   │ Liveblocks│                  │ Supabase Postgres + RLS     │
+   │  rooms     │                 │  • pgvector (intel_chunks)  │
+   │ org:{id}:* │                 │  • subscriptions, ai_runs,  │
+   └───────────┘                  │    ai_feedback, changes …   │
+                                  └───────┬────────────────────┘
+   Inngest (cron + durable steps)        │
+   • scheduled scan (12h floor)          │   Anthropic  (reasoning: summaries, Ask, suggestions)
+   • change.analyze ▶ embed ─────────────┤   OpenAI     (embeddings only → pgvector)
+   • weekly digest                       │   Firecrawl  (clean public-page fetch)
+                                         │   Langfuse   (LLM traces / cost / latency)
+   Stripe (test mode)  ──webhook──▶ subscriptions (plan, seats, status)
+   • Checkout · Portal · metered AI usage (meter events)
+```
+
+**Two-layer multi-tenancy.** Postgres **RLS** keyed on `org_id` (via Supabase
+JWT) for any client-key access, _and_ app-layer scoping: every server query is
+filtered by an `org_id` resolved from the session — never trusted from the
+client. See [`src/lib/org-scope.ts`](src/lib/org-scope.ts).
+
+## Hard parts I solved
+
+- **Multi-tenant isolation, two ways.** RLS policies (`prisma/sql/*.sql`) +
+  app-layer `org_id` scoping, with tenant-isolated Liveblocks rooms
+  (`org:{orgId}:*`) granted server-side so a user can never join another org's
+  room.
+- **Agentic monitoring that can't double-charge.** Each scan stage is an
+  Inngest `step.run`, so a retry resumes without re-fetching, re-analyzing, or
+  re-embedding what already succeeded. Unchanged content (same hash) skips the
+  AI steps entirely — **no change = no spend** — under a hard 12h scan floor.
+- **pgvector + Prisma without drift.** The `vector(1536)` column is modeled as
+  `Unsupported(...)` so migrations never drop it; reads/writes use raw SQL with
+  an HNSW index.
+- **RAG with citations, confidence, and cost** — streamed answers with inline
+  `[n]` citations and per-answer token cost, every call logged to `ai_runs`.
+- **Real-time editing** — CodeMirror bound to a Yjs doc over Liveblocks
+  (conflict-free, live cursors, presence) without losing persistence.
+
+## Engineering judgment on AI (with numbers)
+
+This is the part that matters most. AI here is a **measured, bounded,
+human-supervised** system:
+
+- **Every** AI call writes an `ai_runs` row (model, input/output tokens,
+  cost, latency, Langfuse trace id). The **AI cost dashboard** (`/app/billing`)
+  shows total spend, **cost per answer**, tokens, and avg latency by run type —
+  real numbers, not adjectives.
+- **Confidence routes work to humans.** Findings below a 0.6 confidence
+  threshold ([`src/lib/constants.ts`](src/lib/constants.ts)) go to the **Review
+  Queue**, never auto-published.
+- **An eval loop measures quality.** Thumbs up/down + optional corrections on
+  answers and change summaries write to `ai_feedback`; the dashboard surfaces an
+  **acceptance rate** (thumbs-up share of rated output).
+- **Cost is contained.** Cheap embeddings (OpenAI) vs. reasoning (Anthropic)
+  are kept strictly separate; unchanged pages cost nothing; metered AI usage is
+  reported to Stripe per answer.
+- **Model roles are fixed:** Anthropic (`claude-opus-4-8` default) for all
+  reasoning; OpenAI `text-embedding-3-small` for embeddings only.
+
+> Replace these with your own measured figures after a demo run, e.g.
+> _"cost/answer $0.01–$0.03, p95 answer latency ~Xs, acceptance rate Y%,
+> N sources cited/answer."_
+
+## What's next
+
+Self-hosted Yjs (Hocuspocus) instead of Liveblocks · prompt **evals in CI**
+(golden change inputs → assert classification quality) · a **public read-only
+demo org** route (no signup) · rate limiting + abuse protection · multi-model
+routing + response caching · audit-log UI · Playwright e2e of the full core
+loop · a public status/metrics page.
 
 ---
 
-Phase 0 (foundation) + Phase 1 (the demoable core loop) are complete.
+## Tech stack
 
-**Phase 0 — Foundation**
+Next.js 15 (App Router, RSC, Server Actions) · React 19 · TypeScript (strict) ·
+Tailwind v4 + Framer Motion · Supabase (Postgres, Auth, RLS, pgvector) · Prisma ·
+Inngest · Anthropic (Vercel AI SDK) · OpenAI embeddings · Firecrawl · Liveblocks
++ Yjs + CodeMirror · Langfuse · Stripe (test mode) · Vitest · GitHub Actions CI.
 
-- **Next.js 15** (App Router) · **React 19** · **TypeScript (strict)**
-- **Tailwind CSS v4** design system — "intelligence briefing", light-first
-- **Framer Motion** for meaningful motion
-- **Supabase Auth** foundation (`@supabase/ssr`) — sign-up / sign-in / sign-out
-- **Prisma** schema + raw SQL for **RLS** and the auth→profile trigger
-- App-layer multi-tenancy guard (`src/lib/org-scope.ts`)
-- Premium landing page, protected `/app`
-- **GitHub Actions** CI (lint · typecheck · test) + **Vitest**
-
-**Phase 1 — Core loop**
-
-- Add a **competitor** → add **sources** (pricing / changelog / blog / news /
-  careers) — org-scoped, role-gated.
-- Per-source **"Scan now"**: **Firecrawl** fetch → normalize → hash →
-  `source_snapshot`; on change, an **Anthropic** (Vercel AI SDK, structured
-  output) summary becomes a **change card** in the Intel Feed with category,
-  impact, citation, and a confidence meter.
-- **Ask Sightline** — RAG over collected intel: question embedded
-  (**OpenAI `text-embedding-3-small`** → **pgvector**, org-scoped top-k),
-  answer **streamed** with inline `[n]` citations and **token cost shown**.
-- Every AI call logged to **`ai_runs`** (model, input/output tokens, cost,
-  latency). Model roles are fixed: Anthropic for all reasoning, OpenAI for
-  embeddings only.
-
-**Model roles & default:** reasoning defaults to `claude-opus-4-8`
-(override with `ANTHROPIC_MODEL`); embeddings are `text-embedding-3-small`.
-The build prompt mandates the **Vercel AI SDK** for Anthropic access.
-
-> Not yet built (later phases): Inngest cron, Review Queue, weekly digest,
-> Stripe, Liveblocks battlecards, Langfuse, the AI cost dashboard UI.
-
-## Getting started
+## Setup
 
 ```bash
 npm install
-cp .env.example .env.local   # then fill in your Supabase values
-npm run dev
+cp .env.example .env.local   # fill in values (see .env.example for each)
 ```
 
-Open http://localhost:3000.
-
-### Required environment
-
-See [`.env.example`](./.env.example). To run auth end-to-end you need a real
-Supabase project and these values in `.env.local`:
-
-| Variable                        | Where to find it                                |
-| ------------------------------- | ----------------------------------------------- |
-| `NEXT_PUBLIC_SUPABASE_URL`      | Supabase → Project Settings → API → Project URL |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase → Project Settings → API → anon public |
-| `SUPABASE_SERVICE_ROLE_KEY`     | Supabase → Project Settings → API → service_role |
-| `DATABASE_URL`                  | Supabase → Database → Connection string (pooler, 6543) |
-| `DIRECT_URL`                    | Supabase → Database → Connection string (direct, 5432) |
-| `ANTHROPIC_API_KEY`             | console.anthropic.com (reasoning) |
-| `OPENAI_API_KEY`                | platform.openai.com — **optional**, embeddings only (see below) |
-| `FIRECRAWL_API_KEY`             | firecrawl.dev (public-page fetching) |
-| `LIVEBLOCKS_SECRET_KEY`         | liveblocks.io → project → API keys (collaboration; optional for build) |
-
-> **OpenAI is optional.** Without it (or when it's out of quota), the full scan
-> loop still runs — Firecrawl fetch, snapshot, hash, and the Anthropic change
-> summary all work. Embeddings are skipped non-fatally (a failed `ai_run` is
-> logged) and **Ask Sightline** shows a clean "unavailable until embeddings are
-> enabled" notice instead of erroring. Add a funded key later to turn RAG on.
-
-### Database setup
+### Database
 
 ```bash
-# 1. Create/sync the tables (Phase 0 + Phase 1).
-npx prisma db push                                            # or: npm run prisma:migrate
-
-# 2. Apply RLS + the auth→profile trigger (Phase 0).
-psql "$DIRECT_URL" -f prisma/sql/0001_rls_and_triggers.sql
-
-# 3. Apply pgvector + embedding column + HNSW index + Phase 1 RLS.
-psql "$DIRECT_URL" -f prisma/sql/0002_phase1.sql
-
-# 4. Apply RLS for the Phase 2 `digests` table.
-psql "$DIRECT_URL" -f prisma/sql/0003_phase2.sql
-
-# 5. Apply RLS for the Phase 3 collaboration tables.
-psql "$DIRECT_URL" -f prisma/sql/0004_phase3.sql
+npx prisma db push                                   # create/sync all tables
+psql "$DIRECT_URL" -f prisma/sql/0001_rls_and_triggers.sql   # RLS + auth→profile trigger
+psql "$DIRECT_URL" -f prisma/sql/0002_phase1.sql            # pgvector + embedding col + HNSW
+psql "$DIRECT_URL" -f prisma/sql/0003_phase2.sql            # digests RLS
+psql "$DIRECT_URL" -f prisma/sql/0004_phase3.sql            # collaboration RLS
+psql "$DIRECT_URL" -f prisma/sql/0005_phase4.sql            # billing + feedback RLS
 ```
 
-> No `psql`? Paste each `prisma/sql/*.sql` file into the Supabase **SQL editor**
-> and run it. The SQL files are idempotent.
+(No `psql`? Paste each `prisma/sql/*.sql` into the Supabase SQL editor — they're
+idempotent.)
 
-### Background jobs (Inngest)
-
-In local dev, run the Inngest dev server alongside `npm run dev` (no keys
-needed):
+### Demo data (optional)
 
 ```bash
-npx inngest-cli@latest dev -u http://localhost:3000/api/inngest
+npm run seed:demo            # creates a "Sightline Demo" org with sample intel
 ```
 
-Open the Inngest dev dashboard (http://localhost:8288) to see the
-`scheduled-scan`, `scan-source`, and `weekly-digest` functions and to invoke
-them manually. In production, set `INNGEST_EVENT_KEY` / `INNGEST_SIGNING_KEY`
-and register `/api/inngest` from the Inngest dashboard.
+Or, signed in to an empty workspace, click **Load sample intel** on the feed.
+
+### Stripe (test mode)
+
+Use **test keys only**. In the Stripe dashboard (Test mode):
+
+1. Create products + recurring **per-seat** prices → set `STRIPE_PRO_PRICE_ID`,
+   `STRIPE_TEAM_PRICE_ID`.
+2. Create a **metered** price backed by a Billing **Meter** (event name e.g.
+   `ai_answer`) → set `STRIPE_AI_USAGE_PRICE_ID` + `STRIPE_AI_USAGE_METER_EVENT`.
+3. Forward webhooks locally and copy the printed signing secret:
+   ```bash
+   stripe listen --forward-to localhost:3000/api/stripe/webhook
+   # → whsec_...  →  STRIPE_WEBHOOK_SECRET
+   ```
+4. Test card: **`4242 4242 4242 4242`**, any future expiry, any CVC/ZIP.
+
+### Run
+
+```bash
+npm run dev                  # app at http://localhost:3000
+npx inngest-cli@latest dev   # (optional) Inngest dev server for scheduled jobs
+```
 
 ## Scripts
 
-| Script                  | What it does                          |
-| ----------------------- | ------------------------------------- |
-| `npm run dev`           | Start the dev server                  |
-| `npm run build`         | Production build                      |
-| `npm run lint`          | ESLint (next/core-web-vitals)         |
-| `npm run typecheck`     | `tsc --noEmit` (strict)               |
-| `npm run test`          | Vitest unit/integration tests         |
-| `npm run prisma:migrate`| Prisma dev migration                  |
-
-## Multi-tenancy
-
-Tenant isolation is enforced at **two layers**:
-
-1. **Postgres RLS** keyed on `org_id` via the Supabase JWT — see
-   [`prisma/sql/0001_rls_and_triggers.sql`](./prisma/sql/0001_rls_and_triggers.sql).
-2. **App code** always scopes queries by the authenticated user's `org_id` —
-   see [`src/lib/org-scope.ts`](./src/lib/org-scope.ts), proven by
-   [`src/lib/org-scope.test.ts`](./src/lib/org-scope.test.ts).
+| Script | What it does |
+|---|---|
+| `npm run dev` / `build` / `start` | Next dev / production build (runs `prisma generate` first) / start |
+| `npm run lint` · `typecheck` · `test` | ESLint · `tsc --noEmit` · Vitest |
+| `npm run seed:demo` | Seed the standalone demo org |
+| `npm run prisma:generate` · `prisma:migrate` | Prisma client / dev migration |
