@@ -7,7 +7,6 @@ it into live, collaborative battlecards your whole team shares.
 
 > **Live:** https://sightline-eosin.vercel.app/
 
-![hero screenshot placeholder](docs/hero.png)
 
 ---
 
