@@ -13,6 +13,7 @@ import {
   seatCount,
   getOrgSubscription,
 } from "@/lib/billing/subscription";
+import { logAudit } from "@/lib/audit";
 
 const BILLING: Route = "/app/billing";
 
@@ -67,6 +68,13 @@ export async function startCheckout(formData: FormData): Promise<void> {
   });
 
   if (!session.url) redirect(withError("Could not start checkout."));
+  await logAudit({
+    orgId,
+    actorId: user.id,
+    action: "billing.checkout.started",
+    target: plan,
+    metadata: { seats },
+  });
   redirect(session.url as Route);
 }
 

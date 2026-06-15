@@ -9,11 +9,22 @@ on:
 permissions:
   contents: read
 
+# Placeholder env so the app builds/boots without real secrets. Optional
+# integrations (OpenAI, Stripe, Liveblocks, Upstash) degrade gracefully.
+env:
+  NEXT_PUBLIC_SUPABASE_URL: "https://placeholder.supabase.co"
+  NEXT_PUBLIC_SUPABASE_ANON_KEY: "placeholder-anon-key"
+  NEXT_PUBLIC_SITE_URL: "http://localhost:3100"
+  SUPABASE_SERVICE_ROLE_KEY: "placeholder"
+  DATABASE_URL: "postgresql://u:p@localhost:6543/postgres"
+  DIRECT_URL: "postgresql://u:p@localhost:5432/postgres"
+  ANTHROPIC_API_KEY: "sk-ant-placeholder"
+  FIRECRAWL_API_KEY: "fc-placeholder"
+
 jobs:
   verify:
-    name: Lint · Typecheck · Test
+    name: Lint · Typecheck · Test + Evals
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -36,5 +47,35 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Test
+      # Unit/integration tests AND the prompt evals (cached, deterministic,
+      # zero API spend) run here on every PR.
+      - name: Test + evals
         run: npm run test
+
+  e2e:
+    name: E2E smoke (Playwright)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright (chromium)
+        run: npx playwright install --with-deps chromium
+
+      - name: Build
+        run: npm run build
+
+      # Public-surface smoke (landing, sign-in, sign-up, status). Deterministic;
+      # needs no secrets/DB/AI. The full signed-in core-loop spec is opt-in
+      # (set E2E_BASE_URL/E2E_EMAIL/E2E_PASSWORD against a seeded deploy).
+      - name: Smoke
+        run: npm run e2e:smoke

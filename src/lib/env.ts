@@ -21,6 +21,9 @@ const serverSchema = z.object({
   // Phase 1 — external services (server-only).
   ANTHROPIC_API_KEY: z.string().min(1),
   ANTHROPIC_MODEL: z.string().min(1).default("claude-opus-4-8"),
+  // Cheaper model for lower-stakes structured calls (change classification,
+  // battlecard drafts) — multi-model routing to cut cost. Still Anthropic.
+  ANTHROPIC_FAST_MODEL: z.string().min(1).default("claude-haiku-4-5"),
   // OpenAI is OPTIONAL — embeddings / Ask Sightline RAG degrade gracefully
   // when it is absent or out of quota. The core scan loop never depends on it.
   OPENAI_API_KEY: z.string().min(1).optional(),
@@ -48,6 +51,10 @@ const serverSchema = z.object({
   STRIPE_AI_USAGE_PRICE_ID: z.string().min(1).optional(),
   // The meter event name behind STRIPE_AI_USAGE_PRICE_ID's billing meter.
   STRIPE_AI_USAGE_METER_EVENT: z.string().min(1).default("ai_answer"),
+  // Phase 5 — rate limiting (Upstash Redis). OPTIONAL: when unset, the limiter
+  // falls back to a best-effort in-memory window (fine for dev/single instance).
+  UPSTASH_REDIS_REST_URL: z.string().url().optional(),
+  UPSTASH_REDIS_REST_TOKEN: z.string().min(1).optional(),
 });
 
 export type ClientEnv = z.infer<typeof clientSchema>;

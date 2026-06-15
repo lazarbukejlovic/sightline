@@ -15,7 +15,7 @@ import {
   embeddingsConfigured,
   isQuotaError,
 } from "@/lib/ai/embeddings";
-import { reasoningModelId, embeddingModelId } from "@/lib/ai/models";
+import { embeddingModelId } from "@/lib/ai/models";
 import { logAiRun } from "@/lib/ai/runs";
 
 const MAX_CHUNKS = 20;
@@ -124,7 +124,7 @@ export async function analyzeAndStoreChange(
   capture: Extract<CaptureResult, { kind: "captured" }>,
 ): Promise<AnalyzeStepResult> {
   const startedAt = Date.now();
-  const { analysis, inputTokens, outputTokens } = await analyzeChange({
+  const { analysis, inputTokens, outputTokens, model } = await analyzeChange({
     competitorName: capture.meta.competitorName,
     sourceType: capture.meta.sourceType,
     sourceUrl: capture.meta.sourceUrl,
@@ -135,7 +135,7 @@ export async function analyzeAndStoreChange(
   await logAiRun({
     orgId,
     type: "change_analyze",
-    model: reasoningModelId(),
+    model,
     inputTokens,
     outputTokens,
     latencyMs: Date.now() - startedAt,

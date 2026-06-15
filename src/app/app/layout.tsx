@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { Route } from "next";
 import { prisma } from "@/lib/db/prisma";
 import { requireOrgContext } from "@/lib/org/context";
 import { REVIEW_CONFIDENCE_THRESHOLD } from "@/lib/constants";
@@ -11,7 +12,8 @@ export default async function AppLayout({
   children: React.ReactNode;
 }) {
   // Resolves the user (redirects to sign-in if absent) and bootstraps the org.
-  const { user, orgId } = await requireOrgContext();
+  const { user, orgId, role } = await requireOrgContext();
+  const isAdmin = role === "owner" || role === "admin";
 
   const reviewCount = await prisma.change.count({
     where: {
@@ -65,6 +67,9 @@ export default async function AppLayout({
               </NavLink>
               <NavLink href="/app/digests">Digests</NavLink>
               <NavLink href="/app/billing">Billing</NavLink>
+              {isAdmin && (
+                <NavLink href={"/app/audit" as Route}>Audit</NavLink>
+              )}
             </nav>
           </div>
 

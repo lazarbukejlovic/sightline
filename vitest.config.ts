@@ -17,6 +17,12 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
+      // Neutralize the `server-only` import guard so server modules (server
+      // actions, org context) can be imported and exercised in tests. This is
+      // test-only; production keeps the real guard.
+      "server-only": fileURLToPath(
+        new URL("./src/test/server-only-stub.ts", import.meta.url),
+      ),
     },
   },
 });

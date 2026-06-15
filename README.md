@@ -110,13 +110,27 @@ human-supervised** system:
 > _"cost/answer $0.01–$0.03, p95 answer latency ~Xs, acceptance rate Y%,
 > N sources cited/answer."_
 
+## Hardening (Phase 5)
+
+- **Prompt evals in CI** — a golden set of change inputs + a tolerance scorer
+  ([`src/lib/ai/evals`](src/lib/ai/evals)) run on every PR against cached
+  cassettes (zero API spend); `EVAL_LIVE=1 npm run eval` runs the real prompt.
+- **Playwright e2e** — public-surface smoke runs in CI; the full signed-in core
+  loop (`e2e/core-loop.spec.ts`) is opt-in against a seeded deploy.
+- **Rate limiting** — per-org/user on scan + Ask (Upstash Redis, in-memory
+  fallback), with clear 429s.
+- **Multi-model routing + caching** — change classification + battlecard drafts
+  use a cheaper model (`ANTHROPIC_FAST_MODEL`); repeat Ask answers are cached
+  org-scoped. Anthropic stays for high-stakes reasoning; OpenAI embeddings-only.
+- **Audit log** — owner/admin-only `/app/audit` over the `audit_log` table.
+- **Public status page** — `/status` (aggregate, non-sensitive metrics).
+
 ## What's next
 
-Self-hosted Yjs (Hocuspocus) instead of Liveblocks · prompt **evals in CI**
-(golden change inputs → assert classification quality) · a **public read-only
-demo org** route (no signup) · rate limiting + abuse protection · multi-model
-routing + response caching · audit-log UI · Playwright e2e of the full core
-loop · a public status/metrics page.
+Self-hosted Yjs (Hocuspocus) instead of Liveblocks — see
+[`docs/phase5-hocuspocus.md`](docs/phase5-hocuspocus.md) for the plan + parity
+gate (kept Liveblocks until verified) · a **public read-only demo org** route
+(no signup) · multi-model response-quality routing · a public metrics history.
 
 ---
 
@@ -143,6 +157,7 @@ psql "$DIRECT_URL" -f prisma/sql/0002_phase1.sql            # pgvector + embeddi
 psql "$DIRECT_URL" -f prisma/sql/0003_phase2.sql            # digests RLS
 psql "$DIRECT_URL" -f prisma/sql/0004_phase3.sql            # collaboration RLS
 psql "$DIRECT_URL" -f prisma/sql/0005_phase4.sql            # billing + feedback RLS
+psql "$DIRECT_URL" -f prisma/sql/0006_phase5.sql            # audit-log RLS
 ```
 
 (No `psql`? Paste each `prisma/sql/*.sql` into the Supabase SQL editor — they're
@@ -183,6 +198,8 @@ npx inngest-cli@latest dev   # (optional) Inngest dev server for scheduled jobs
 | Script | What it does |
 |---|---|
 | `npm run dev` / `build` / `start` | Next dev / production build (runs `prisma generate` first) / start |
-| `npm run lint` · `typecheck` · `test` | ESLint · `tsc --noEmit` · Vitest |
+| `npm run lint` · `typecheck` · `test` | ESLint · `tsc --noEmit` · Vitest (incl. prompt evals) |
+| `npm run eval` | Prompt evals (set `EVAL_LIVE=1` to hit the model) |
+| `npm run e2e` · `e2e:smoke` | Playwright e2e (all / public smoke) |
 | `npm run seed:demo` | Seed the standalone demo org |
 | `npm run prisma:generate` · `prisma:migrate` | Prisma client / dev migration |

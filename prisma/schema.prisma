@@ -403,3 +403,22 @@ model AiFeedback {
   @@index([orgId, createdAt(sort: Desc)])
   @@map("ai_feedback")
 }
+
+// ─────────────────────────────────────────────────────────────
+// Phase 5 — audit log (senior hardening)
+// ─────────────────────────────────────────────────────────────
+
+/// Append-only record of significant org actions (who did what, to what, when).
+/// Written server-side, read by an owner/admin-only UI. Org-scoped + RLS.
+model AuditLog {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orgId     String   @map("org_id") @db.Uuid
+  actorId   String?  @map("actor_id") @db.Uuid
+  action    String
+  target    String?
+  metadata  Json?    @db.JsonB
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([orgId, createdAt(sort: Desc)])
+  @@map("audit_log")
+}

@@ -36,18 +36,32 @@ function openai() {
   return _embeddings;
 }
 
-/** The configured reasoning model id (e.g. claude-opus-4-8). */
+/** The configured high-stakes reasoning model id (e.g. claude-opus-4-8). */
 export function reasoningModelId(): string {
   return getServerEnv().ANTHROPIC_MODEL;
+}
+
+/**
+ * The cheaper "fast" model for lower-stakes structured calls (change
+ * classification, battlecard drafts) — multi-model routing to cut cost. Still
+ * Anthropic. Defaults to claude-haiku-4-5; configurable via ANTHROPIC_FAST_MODEL.
+ */
+export function fastModelId(): string {
+  return getServerEnv().ANTHROPIC_FAST_MODEL;
 }
 
 export function embeddingModelId(): string {
   return getServerEnv().OPENAI_EMBEDDING_MODEL;
 }
 
-/** Anthropic LanguageModel for generateObject / streamText. */
+/** Anthropic LanguageModel for high-stakes reasoning (Ask answers). */
 export function reasoningModel() {
   return anthropic()(reasoningModelId());
+}
+
+/** Anthropic LanguageModel for lower-stakes structured calls. */
+export function fastModel() {
+  return anthropic()(fastModelId());
 }
 
 /** OpenAI embedding model for embed / embedMany. */

@@ -1,7 +1,7 @@
 import "server-only";
 import { generateText } from "ai";
 import { prisma } from "@/lib/db/prisma";
-import { reasoningModel, reasoningModelId } from "@/lib/ai/models";
+import { fastModel, fastModelId } from "@/lib/ai/models";
 import { logAiRun } from "@/lib/ai/runs";
 import { ensureBattlecard } from "@/lib/battlecard";
 
@@ -31,7 +31,7 @@ export async function maybeSuggestBattlecard(input: SuggestInput): Promise<void>
 
     const startedAt = Date.now();
     const { text, usage } = await generateText({
-      model: reasoningModel(),
+      model: fastModel(),
       system:
         "You help sales teams keep competitor battlecards current. Given a newly detected, " +
         "high-impact competitor change, draft a SHORT battlecard edit (2–4 bullet points) a rep " +
@@ -48,7 +48,7 @@ Draft the suggested battlecard edit:`,
     await logAiRun({
       orgId: input.orgId,
       type: "battlecard_suggest",
-      model: reasoningModelId(),
+      model: fastModelId(),
       inputTokens: usage?.inputTokens,
       outputTokens: usage?.outputTokens,
       latencyMs: Date.now() - startedAt,

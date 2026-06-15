@@ -31,6 +31,7 @@ export function AskSightline({ competitorId }: { competitorId?: string }) {
   const [status, setStatus] = useState<"idle" | "streaming" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [rateLimited, setRateLimited] = useState<number | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   async function ask() {
@@ -44,6 +45,7 @@ export function AskSightline({ competitorId }: { competitorId?: string }) {
     setRunId(null);
     setError(null);
     setNotice(null);
+    setRateLimited(null);
 
     const controller = new AbortController();
     abortRef.current = controller;
@@ -63,6 +65,13 @@ export function AskSightline({ competitorId }: { competitorId?: string }) {
         const body = await res.json().catch(() => null);
         if (body?.unavailable) {
           setNotice(body.message as string);
+          setStatus("idle");
+          return;
+        }
+        // Rate limited: a known, expected backpressure signal — surface it as a
+        // calm "cooling down" affordance, not a hard error.
+        if (res.status === 429) {
+          setRateLimited(typeof body?.retryAfter === "number" ? body.retryAfter : 0);
           setStatus("idle");
           return;
         }
@@ -143,6 +152,31 @@ export function AskSightline({ competitorId }: { competitorId?: string }) {
       {error && <Callout tone="error">{error}</Callout>}
 
       {notice && <Callout tone="info">{notice}</Callout>}
+
+      {rateLimited !== null && (
+        <motion.div
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: DURATION.base, ease: EASE_OUT }}
+          className="flex items-center gap-2.5 rounded-md border border-amber/30 bg-amber/10 px-3 py-2.5"
+        >
+          <span aria-hidden className="size-2 shrink-0 rounded-full bg-amber animate-breathe" />
+          <span className="rule-eyebrow text-[9px] text-amber">Rate limited</span>
+          <span className="text-xs text-foreground">
+            Catching our breath
+            {rateLimited > 0 ? (
+              <>
+                {" "}
+                — try again in{" "}
+                <span className="font-meta tabular-nums">{rateLimited}s</span>
+              </>
+            ) : (
+              " — try again shortly"
+            )}
+            .
+          </span>
+        </motion.div>
+      )}
 
       {(answer || status === "streaming") && (
         <motion.div

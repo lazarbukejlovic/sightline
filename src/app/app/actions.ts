@@ -12,6 +12,8 @@ import { ensureBattlecard } from "@/lib/battlecard";
 import { getOrgPlan } from "@/lib/billing/subscription";
 import { canAddCompetitor, planAllows, competitorLimit } from "@/lib/billing/plans";
 import { seedDemoData } from "@/lib/demo-seed";
+import { rateLimit, RATE_LIMITS } from "@/lib/ratelimit";
+import { logAudit } from "@/lib/audit";
 
 export interface ActionState {
   error?: string;
@@ -32,7 +34,7 @@ export async function createCompetitor(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
-  const { orgId, role } = await requireOrgContext();
+  const { user, orgId, role } = await requireOrgContext();
   try {
     assertAtLeast(role, "member");
   } catch {
@@ -67,6 +69,12 @@ export async function createCompetitor(
     },
   });
 
+  await logAudit({
+    orgId,
+    actorId: user.id,
+    action: "competitor.created",
+    target: parsed.data.name,
+  });
   revalidatePath("/app");
   return { message: `Now tracking ${parsed.data.name}.` };
 }
@@ -81,7 +89,7 @@ export async function createSource(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
-  const { orgId, role } = await requireOrgContext();
+  const { user, orgId, role } = await requireOrgContext();
   try {
     assertAtLeast(role, "member");
   } catch {
@@ -115,6 +123,13 @@ export async function createSource(
     },
   });
 
+  await logAudit({
+    orgId,
+    actorId: user.id,
+    action: "source.created",
+    target: parsed.data.url,
+    metadata: { type: parsed.data.type },
+  });
   revalidatePath(`/app/competitors/${competitor.id}`);
   revalidatePath("/app");
   return { message: "Source added. Run a scan to capture the first snapshot." };
@@ -124,11 +139,19 @@ export async function scanSource(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
-  const { orgId, role } = await requireOrgContext();
+  const { user, orgId, role } = await requireOrgContext();
   try {
     assertAtLeast(role, "member");
   } catch {
     return { error: "You don't have permission to run scans." };
+  }
+
+  // Abuse protection: per-org limit on manual scans.
+  const rl = await rateLimit(orgId, RATE_LIMITS.scan);
+  if (!rl.success) {
+    return {
+      error: `Too many scans — try again in ${rl.resetSeconds}s.`,
+    };
   }
 
   const sourceId = z.string().uuid().safeParse(formData.get("sourceId"));
@@ -138,6 +161,13 @@ export async function scanSource(
 
   try {
     const result = await runScan(orgId, sourceId.data);
+    await logAudit({
+      orgId,
+      actorId: user.id,
+      action: "scan.run",
+      target: sourceId.data,
+      metadata: { changed: result.changed, meaningful: result.meaningful },
+    });
     revalidatePath("/app");
     const source = await prisma.source.findFirst({
       where: { id: sourceId.data, orgId },
@@ -164,7 +194,7 @@ export async function reviewChange(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
-  const { orgId, role } = await requireOrgContext();
+  const { user, orgId, role } = await requireOrgContext();
   try {
     assertAtLeast(role, "member");
   } catch {
@@ -188,6 +218,12 @@ export async function reviewChange(
     return { error: "Change not found in this organization." };
   }
 
+  await logAudit({
+    orgId,
+    actorId: user.id,
+    action: `change.${parsed.data.decision}`,
+    target: parsed.data.changeId,
+  });
   revalidatePath("/app/review");
   revalidatePath("/app");
   return {
@@ -397,6 +433,12 @@ export async function resolveSuggestion(
     return { error: "Suggestion not found or already resolved." };
   }
 
+  await logAudit({
+    orgId,
+    actorId: user.id,
+    action: `battlecard.suggestion.${parsed.data.decision}`,
+    target: parsed.data.suggestionId,
+  });
   revalidatePath(`/app/battlecards/${parsed.data.battlecardId}`);
   return {
     message:

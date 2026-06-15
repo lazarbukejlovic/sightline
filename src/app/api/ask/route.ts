@@ -12,6 +12,12 @@ import { retrieveChunks, buildAskPrompt } from "@/lib/ai/ask";
 import { logAiRun } from "@/lib/ai/runs";
 import { computeCostUsd } from "@/lib/ai/pricing";
 import { reportAiUsage } from "@/lib/billing/subscription";
+import { rateLimit, RATE_LIMITS } from "@/lib/ratelimit";
+import {
+  answerCacheKey,
+  getCachedAnswer,
+  setCachedAnswer,
+} from "@/lib/ai/answer-cache";
 
 const UNAVAILABLE_MESSAGE =
   "Ask Sightline is unavailable until embeddings are enabled. Your scans and snapshots are still saved.";
@@ -32,7 +38,19 @@ const bodySchema = z.object({
  * Lines: {"type":"sources",...} → {"type":"text",...}* → {"type":"done",...}
  */
 export async function POST(request: NextRequest) {
-  const { orgId } = await requireOrgContext();
+  const { user, orgId } = await requireOrgContext();
+
+  // Abuse protection: per-org+user limit on Ask answers.
+  const rl = await rateLimit(`${orgId}:${user.id}`, RATE_LIMITS.ask);
+  if (!rl.success) {
+    return Response.json(
+      {
+        error: `Too many questions — try again in ${rl.resetSeconds}s.`,
+        retryAfter: rl.resetSeconds,
+      },
+      { status: 429, headers: { "Retry-After": String(rl.resetSeconds) } },
+    );
+  }
 
   const json = await request.json().catch(() => null);
   const parsed = bodySchema.safeParse(json);
@@ -40,6 +58,29 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: "Invalid question." }, { status: 400 });
   }
   const { question, competitorId } = parsed.data;
+  const encoder = new TextEncoder();
+
+  // Response cache: replay a recent identical answer (org-scoped) for free.
+  const cacheKey = answerCacheKey(orgId, question, competitorId);
+  const cached = await getCachedAnswer(cacheKey);
+  if (cached) {
+    const replay = new ReadableStream<Uint8Array>({
+      start(controller) {
+        const send = (obj: unknown) =>
+          controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"));
+        send({ type: "sources", citations: cached.citations });
+        send({ type: "text", text: cached.answer });
+        send({ type: "done", runId: null, cached: true, cost: cached.cost });
+        controller.close();
+      },
+    });
+    return new Response(replay, {
+      headers: {
+        "Content-Type": "application/x-ndjson; charset=utf-8",
+        "Cache-Control": "no-store",
+      },
+    });
+  }
 
   // Ask Sightline depends on embeddings. If OpenAI isn't configured, return a
   // clean, non-error notice (HTTP 200) — the scan loop is unaffected.
@@ -81,7 +122,6 @@ export async function POST(request: NextRequest) {
 
   const { system, prompt, citations } = buildAskPrompt(question, chunks);
 
-  const encoder = new TextEncoder();
   const model = reasoningModelId();
 
   const stream = new ReadableStream<Uint8Array>({
@@ -123,11 +163,15 @@ export async function POST(request: NextRequest) {
         // unless billing is configured and the org has a customer).
         await reportAiUsage(orgId);
 
-        send({
-          type: "done",
-          runId: run.id,
-          cost: { inputTokens, outputTokens, costUsd, model },
-        });
+        const cost = { inputTokens, outputTokens, costUsd, model };
+        // Cache for repeat questions (best-effort; never breaks the response).
+        await setCachedAnswer(cacheKey, {
+          answer: fullText,
+          citations,
+          cost,
+        }).catch(() => {});
+
+        send({ type: "done", runId: run.id, cost });
       } catch (err) {
         const detail = err instanceof Error ? err.message : "Unknown error.";
         send({ type: "error", error: detail });
