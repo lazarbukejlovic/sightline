@@ -5,7 +5,7 @@ your competitors' public footprint, detects what _meaningfully_ changed,
 explains _why it matters_ with cited evidence and a confidence score, and turns
 it into live, collaborative battlecards your whole team shares.
 
-> **Live demo:** _add your Vercel URL here_ · **Walkthrough:** _add your Loom link here_
+> **Live:** https://sightline-eosin.vercel.app/
 
 ![hero screenshot placeholder](docs/hero.png)
 
@@ -105,10 +105,7 @@ human-supervised** system:
   reported to Stripe per answer.
 - **Model roles are fixed:** Anthropic (`claude-opus-4-8` default) for all
   reasoning; OpenAI `text-embedding-3-small` for embeddings only.
-
-> Replace these with your own measured figures after a demo run, e.g.
-> _"cost/answer $0.01–$0.03, p95 answer latency ~Xs, acceptance rate Y%,
-> N sources cited/answer."_
+  
 
 ## Hardening (Phase 5)
 
